@@ -1,0 +1,7 @@
+Flask
+sympy
+numpy
+matplotlib
+pywebview
+qtpy
+PySide6

@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PrettyCAS — Plot</title>
+  <script src="./theme-init.js"></script>
+  <link rel="stylesheet" href="./node_modules/mathlive/mathlive-static.css">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="plot-page">
+  <canvas id="bg-fx-canvas" class="bg-fx-canvas" aria-hidden="true"></canvas>
+  <div class="bg-fx-pulse" aria-hidden="true">
+    <span class="pulse-orb pulse-orb-1"></span>
+    <span class="pulse-orb pulse-orb-2"></span>
+    <span class="pulse-orb pulse-orb-3"></span>
+  </div>
+
+  <header class="topbar">
+    <h1 id="app-title" title="Click to toggle debug mode">PrettyCAS</h1>
+    <nav class="pages">
+      <a href="./index.html">Compute</a>
+      <a href="./plot.html" aria-current="page">Plot</a>
+      <a href="./help.html">Help</a>
+    </nav>
+    <div class="menu-wrap">
+      <button id="misc-menu-toggle" class="icon-button" title="More" aria-label="More">&#9776;</button>
+      <div id="misc-menu" class="misc-menu" hidden>
+        <a href="./misc.html">Misc</a>
+      </div>
+    </div>
+    <button id="settings-toggle" class="icon-button" title="App settings" aria-label="App settings">&#9881;</button>
+  </header>
+
+  <main class="plot-layout">
+    <aside class="expr-panel">
+      <div class="expr-panel-header">
+        <h2>Expressions</h2>
+        <p class="expr-panel-subtitle">Type a function, or <code>name = value</code> for a slider constant.</p>
+      </div>
+      <div class="expr-list" id="expr-list"></div>
+      <button type="button" id="add-expr" class="expr-add">+ Add expression</button>
+    </aside>
+
+    <section class="plot-stage">
+      <div id="plot-panel" class="plot-panel" data-mode="idle">
+        <div class="plot-toolbar">
+          <div class="mode-toggle" role="group" aria-label="Plot dimensions">
+            <button type="button" class="mode-btn is-active" data-mode="2d">2D</button>
+            <button type="button" class="mode-btn" data-mode="3d">3D</button>
+          </div>
+
+          <div class="plot-toolbar-titles">
+            <span class="plot-title" id="plot-title">2D Graph</span>
+            <span class="plot-subtitle" id="plot-subtitle">Add an expression to get started</span>
+          </div>
+
+          <div class="plot-toolbar-actions">
+            <div class="graph-settings-wrap">
+              <button type="button" id="graph-settings-toggle" class="icon-button" title="Graph settings" aria-label="Graph settings">&#9881;</button>
+              <div class="graph-settings-panel" id="graph-settings-panel" hidden></div>
+            </div>
+            <div class="export-menu-wrap">
+              <button type="button" id="export-toggle" class="secondary" title="Export plot">Export &#9662;</button>
+              <div class="export-menu" id="export-menu" hidden>
+                <div class="export-menu-label">Image</div>
+                <button type="button" data-format="png">Save as PNG</button>
+                <button type="button" data-format="jpeg">Save as JPEG</button>
+                <div class="export-menu-divider"></div>
+                <div class="export-menu-label">Vector</div>
+                <button type="button" data-format="svg">Save as SVG</button>
+                <button type="button" data-format="pdf">Save as PDF</button>
+                <button type="button" data-format="eps">Save as EPS</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="plot-canvas-area">
+          <div id="plot" class="plot-canvas" hidden></div>
+          <p id="plot-placeholder" class="empty-note">Add an expression on the left to get started.</p>
+          <div id="plot-error" class="plot-error" hidden></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="settings-backdrop" class="settings-backdrop">
+    <aside class="settings-panel">
+      <h2>Settings</h2>
+      <div id="settings-body"></div>
+    </aside>
+  </div>
+
+  <script src="./node_modules/plotly.js-dist-min/plotly.min.js"></script>
+  <script type="module" src="./plot.js"></script>
+  <script type="module" src="./background-fx.js"></script>
+</body>
+</html>

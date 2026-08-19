@@ -1,0 +1,1588 @@
+:root {
+  --bg: #eef0f6;
+  --bg-accent: #e4e8fb;
+  --panel-bg: #ffffff;
+  --border: #e1e3ec;
+  --border-strong: #c9cce0;
+  --text: #1b1d29;
+  --text-dim: #6b6f80;
+  --text-faint: #9598a8;
+
+  /* Accent is an HSL triple so theme swatches only need to override the
+     three components below; --accent/--accent-hover/--accent-soft derive
+     from them and automatically stay correct against light or dark panels. */
+  --accent-h: 243;
+  --accent-s: 100%;
+  --accent-l: 66%;
+  --accent: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --accent-hover: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 9%));
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--panel-bg));
+  --accent-text: #ffffff;
+
+  --error: #d1453b;
+  --error-soft: #fdecea;
+  --success: #1a9c6e;
+  --success-soft: #e8f8f1;
+  --shadow-sm: 0 1px 2px rgba(20, 22, 40, 0.04), 0 1px 1px rgba(20, 22, 40, 0.03);
+  --shadow-md: 0 8px 24px rgba(24, 26, 46, 0.08), 0 2px 6px rgba(24, 26, 46, 0.04);
+  --shadow-lg: 0 20px 45px rgba(24, 26, 46, 0.14);
+  --radius: 14px;
+  --radius-sm: 8px;
+  --mono: "SFMono-Regular", ui-monospace, Consolas, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Inter", sans-serif;
+}
+
+/* Accent themes: pick from the settings panel's color swatches. */
+[data-accent="indigo"]  { --accent-h: 243; --accent-s: 100%; --accent-l: 66%; }
+[data-accent="crimson"] { --accent-h: 4;   --accent-s: 78%;  --accent-l: 54%; }
+[data-accent="sand"]    { --accent-h: 34;  --accent-s: 48%;  --accent-l: 46%; }
+[data-accent="emerald"] { --accent-h: 152; --accent-s: 55%;  --accent-l: 38%; }
+[data-accent="violet"]  { --accent-h: 271; --accent-s: 62%;  --accent-l: 58%; }
+[data-accent="slate"]   { --accent-h: 215; --accent-s: 16%;  --accent-l: 42%; }
+
+/* Arbitrary accent picked via the settings panel's color input.
+   --accent-hover is overridden explicitly since (unlike --accent-soft) it
+   doesn't derive from --accent, so it wouldn't otherwise pick up a custom
+   color. --accent-custom gets a fallback so nothing is invalid before
+   settings.js's first applyTheme() call sets the real value. */
+[data-accent="custom"] {
+  --accent: var(--accent-custom, #4f5bff);
+  --accent-hover: color-mix(in srgb, var(--accent-custom, #4f5bff) 85%, black);
+}
+
+/* There's no separate light/dark "theme" setting — only a background color
+   (system-default or custom). When no custom background is picked, the
+   default one follows the OS preference automatically. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-custom-bg="true"]) {
+    --bg: #14151f;
+    --bg-accent: #1c1d30;
+  }
+}
+
+/* Arbitrary background picked via the settings panel's color input wins
+   over the OS-preference default above (same :root+attribute specificity,
+   so source order decides). */
+:root[data-custom-bg="true"] {
+  --bg: var(--bg-custom, #eef0f6);
+  --bg-accent: var(--bg-custom, #eef0f6);
+}
+
+/* Panel/text/border/shadow tokens don't follow their own light/dark
+   choice — they follow whatever background actually ended up in effect
+   above. data-bg-tone is computed from that background's own luminance
+   (see theme-init.js / settings.js), so e.g. a dark custom background gets
+   light-on-dark panels regardless of the OS setting, and a light custom
+   background gets dark-on-light panels even when the OS is set to dark. */
+:root[data-bg-tone="dark"] {
+  --panel-bg: #1c1d2b;
+  --border: #2c2d3d;
+  --border-strong: #3a3b4e;
+  --text: #eceef5;
+  --text-dim: #a3a6ba;
+  --text-faint: #767a90;
+  --error-soft: rgba(209, 69, 59, 0.18);
+  --success-soft: rgba(26, 156, 110, 0.18);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 45px rgba(0, 0, 0, 0.55);
+}
+
+/* Lets MathLive's own internal (shadow-DOM) styling follow the resolved
+   background tone too, not just the OS setting, since color-scheme on an
+   ancestor affects how descendant shadow trees resolve that media feature. */
+:root { color-scheme: light dark; }
+:root[data-bg-tone="light"] { color-scheme: light; }
+:root[data-bg-tone="dark"] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+
+/* The page background lives on html, not body: html's background is always
+   unambiguously what paints the actual document canvas, at the very back
+   of the stack. Putting it on body instead is ambiguous — browsers may
+   propagate a body background up to paint the canvas too, which would then
+   sit in front of (not behind) a position:fixed, negative-z-index child of
+   body like the effects layer below, hiding it entirely. */
+html {
+  background:
+    radial-gradient(1200px 500px at 15% -10%, var(--bg-accent), transparent),
+    var(--bg);
+  transition: background-color 0.15s ease;
+}
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  transition: color 0.15s ease;
+}
+
+/* ---------- Background effects ---------- */
+
+.bg-fx-canvas,
+.bg-fx-pulse {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* .bg-fx-canvas is shared by every canvas-drawn effect (matrix/circuit/
+   spiral) — background-fx.js picks which one draws to it, so this only
+   needs to hide it for the non-canvas states. */
+:root[data-bg-fx="none"] .bg-fx-canvas,
+:root[data-bg-fx="pulse"] .bg-fx-canvas { display: none; }
+:root:not([data-bg-fx="pulse"]) .bg-fx-pulse { display: none; }
+
+.bg-fx-canvas { opacity: 0.55; }
+
+.bg-fx-pulse { overflow: hidden; }
+
+.pulse-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.45;
+  animation: pulse-float 18s ease-in-out infinite;
+}
+
+.pulse-orb-1 {
+  width: 42vw;
+  height: 42vw;
+  top: -12%;
+  left: -10%;
+  background: var(--accent);
+}
+
+.pulse-orb-2 {
+  width: 34vw;
+  height: 34vw;
+  bottom: -14%;
+  right: -8%;
+  background: color-mix(in srgb, var(--accent) 60%, white 40%);
+  animation-delay: -6s;
+}
+
+.pulse-orb-3 {
+  width: 30vw;
+  height: 30vw;
+  top: 42%;
+  left: 58%;
+  background: var(--accent-hover);
+  animation-delay: -12s;
+}
+
+@keyframes pulse-float {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.35; }
+  50% { transform: translate(5%, 7%) scale(1.15); opacity: 0.55; }
+}
+
+/* ---------- Topbar ---------- */
+
+header.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1.5rem;
+  background: color-mix(in srgb, var(--panel-bg) 85%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+header.topbar h1 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+  margin-right: auto;
+  padding: 0.2rem 0;
+  background: linear-gradient(135deg, var(--accent), #8a5bff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  cursor: pointer;
+  user-select: none;
+  opacity: 1;
+  transition: opacity 0.15s ease;
+}
+
+header.topbar h1:hover { opacity: 0.8; }
+
+/* A small dot marks debug mode as on — the title doubles as its toggle. */
+header.topbar h1.is-debug::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+nav.pages {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--bg);
+  padding: 0.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+nav.pages a {
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  font-weight: 500;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+nav.pages a:hover:not([aria-current="page"]) {
+  color: var(--text);
+}
+
+nav.pages a[aria-current="page"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-sm);
+}
+
+button.icon-button {
+  border: 1px solid var(--border);
+  background: var(--panel-bg);
+  border-radius: var(--radius-sm);
+  width: 2.35rem;
+  height: 2.35rem;
+  font-size: 1.15rem;
+  cursor: pointer;
+  line-height: 1;
+  color: var(--text-dim);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+button.icon-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.menu-wrap { position: relative; }
+
+.misc-menu {
+  position: absolute;
+  top: 2.7rem;
+  right: 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 0.35rem;
+  z-index: 15;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.misc-menu[hidden] { display: none; }
+
+.misc-menu a {
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  font-weight: 500;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.misc-menu a:hover { color: var(--text); background: var(--bg); }
+.misc-menu a[aria-current="page"] { background: var(--accent); color: var(--accent-text); }
+
+/* ---------- Layout ---------- */
+
+main {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- Math input ---------- */
+
+math-field {
+  font-size: 1.5rem;
+  width: 100%;
+  display: block;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  background: var(--panel-bg);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* MathLive decides whether to show its own menu-toggle button by measuring
+   the field's width at some internal setup/focus event, and — at least
+   under the pywebview desktop window's particular startup sequence (a
+   GApplication + idle-queued window realization, unlike a plain browser
+   tab) — that measurement can land before layout has settled, permanently
+   inline-styling the button to display:none with nothing ever re-running
+   the check to correct it (confirmed: focusing/resizing afterward doesn't
+   fix it either). Rather than chase that exact timing race, just override
+   the outcome directly: the field is always wide enough here in practice,
+   so force the toggle visible regardless of what MathLive measured.
+   #mf specifically — plot.js's expression-row fields deliberately hide
+   this same part just below, and !important is what it takes to beat an
+   inline style set by the shadow tree's own JS. */
+#mf::part(menu-toggle) {
+  display: flex !important;
+}
+
+math-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  outline: none;
+}
+
+.row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.quick-toggles { margin-top: 0.75rem; gap: 0.5rem; }
+.quick-toggles .copy-btn { margin-left: auto; }
+
+/* A single button per setting that states its current value and cycles to
+   the next one on click, instead of a segmented control showing every
+   option at once — stays compact no matter how many values a setting has. */
+.cycle-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  padding: 0.35rem 0.75rem 0.35rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.cycle-toggle::after {
+  content: "⇄";
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.cycle-toggle:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cycle-toggle:hover::after { color: var(--accent); }
+
+button {
+  font-family: inherit;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 1.3rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+button.primary:hover { background: var(--accent-hover); box-shadow: var(--shadow-md); }
+button.primary:active { transform: translateY(1px); }
+
+button.secondary {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-dim);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+button.secondary:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* Subtle "just say Copy" buttons — a ghost link rather than a bordered
+   button, so they read as a small utility action, not a primary control. */
+.copy-btn {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.copy-btn:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------- Output ---------- */
+
+.output-panel {
+  transition: border-color 0.15s ease;
+  min-height: 5rem;
+}
+
+.output-panel[data-mode="idle"] { border-style: dashed; }
+
+.output-panel[data-mode="error"] {
+  border-color: var(--error);
+  background: var(--error-soft);
+}
+
+.output-panel[data-mode="pending"] { opacity: 0.7; }
+
+.output-panel-title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.output-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.output-panel .badges {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  color: var(--accent);
+}
+
+.output-panel[data-mode="error"] .badge {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 18%, var(--panel-bg));
+}
+
+.output-render {
+  font-size: 1.45rem;
+  overflow-x: auto;
+  padding: 0.5rem 0.25rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.result-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.result-line { overflow-x: auto; }
+
+.output-panel[data-mode="error"] .output-render {
+  font-size: 1rem;
+  color: var(--error);
+  font-family: var(--mono);
+}
+
+.output-render .result-bool {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 1.1rem;
+  padding: 0.3rem 0.9rem;
+  border-radius: 999px;
+}
+
+.output-render .result-bool.is-true { color: var(--success); background: var(--success-soft); }
+.output-render .result-bool.is-false { color: var(--error); background: var(--error-soft); }
+
+pre.output-debug {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  color: var(--text-dim);
+}
+
+.placeholder {
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 1rem;
+}
+
+/* Debug mode: input (LaTeX + MathJSON), the rendered result, and the raw
+   response — stacked as labeled sections rather than replacing the pretty
+   result with just a JSON dump. */
+.debug-section + .debug-section { margin-top: 1.1rem; }
+
+.debug-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  margin-bottom: 0.35rem;
+}
+
+.debug-rendered {
+  font-size: 1.3rem;
+  padding: 0.3rem 0.2rem;
+}
+
+/* ---------- Settings panel ---------- */
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 16, 30, 0.28);
+  backdrop-filter: blur(2px);
+  display: none;
+  z-index: 20;
+}
+
+.settings-backdrop.open { display: block; }
+
+.settings-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 90vw;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border);
+  padding: 1.5rem;
+  transform: translateX(100%);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+
+.settings-backdrop.open .settings-panel { transform: translateX(0); }
+
+.settings-panel h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 1.25rem;
+}
+
+.settings-group {
+  margin-bottom: 0;
+  padding: 1.5rem 0 1.6rem;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.settings-group:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.settings-group legend {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  padding: 0;
+  margin-bottom: 0.65rem;
+}
+
+.settings-group label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.92rem;
+  padding: 0.45rem 0.3rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s ease;
+}
+
+.settings-group label:hover { background: var(--bg); }
+
+.settings-group label.settings-subitem {
+  margin-top: 0.5rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--border);
+}
+
+.settings-group input[type="radio"],
+.settings-group input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 1rem;
+  height: 1rem;
+}
+
+/* Color fields: a row of preset swatches plus a native color picker for an
+   arbitrary choice — accent and background each get one. */
+
+.color-field { margin-top: 0.85rem; }
+
+.color-field-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 0.4rem;
+}
+
+.swatch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  flex-shrink: 0;
+}
+
+.swatch:hover { transform: scale(1.1); }
+
+.swatch.is-active { box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text); }
+
+.swatch.is-active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  mix-blend-mode: difference;
+}
+
+.swatch[data-accent-preset="indigo"]  { background: hsl(243 100% 66%); }
+.swatch[data-accent-preset="crimson"] { background: hsl(4 78% 54%); }
+.swatch[data-accent-preset="sand"]    { background: hsl(34 48% 46%); }
+.swatch[data-accent-preset="emerald"] { background: hsl(152 55% 38%); }
+.swatch[data-accent-preset="violet"]  { background: hsl(271 62% 58%); }
+.swatch[data-accent-preset="slate"]   { background: hsl(215 16% 42%); }
+
+.swatch-reset {
+  background: var(--panel-bg);
+  color: var(--text-faint);
+  font-size: 0.95rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Native color picker, reshaped to sit flush with the round swatches. */
+.color-picker {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  background: var(--panel-bg);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transition: box-shadow 0.12s ease;
+}
+
+.color-picker.is-active { box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text); }
+
+.color-picker::-webkit-color-swatch-wrapper { padding: 0; border-radius: 50%; }
+.color-picker::-webkit-color-swatch { border: none; border-radius: 50%; }
+.color-picker::-moz-color-swatch { border: none; border-radius: 50%; }
+
+/* Decimal-places slider + custom amount */
+
+.decimals-control {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.6rem 0.1rem 0;
+  transition: opacity 0.15s ease;
+}
+
+#settings-body[data-number-format="standard"] .decimals-control {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.decimals-control input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.decimals-control input[type="number"] {
+  width: 4.5rem;
+  flex-shrink: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  background: var(--panel-bg);
+  color: var(--text);
+}
+
+.decimals-control input[type="number"]:focus,
+.decimals-control input[type="range"]:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------- History ---------- */
+
+details.history {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+details.history summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  list-style: none;
+}
+
+details.history summary::-webkit-details-marker { display: none; }
+
+details.history summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 0.4rem;
+  transition: transform 0.15s ease;
+  color: var(--text-faint);
+}
+
+details.history[open] summary::before { transform: rotate(90deg); }
+
+.history-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+.history-list {
+  margin-top: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.history-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  background: var(--bg);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.history-item:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+/* Workspace entries aren't click-to-reuse like history entries are — reset
+   the affordances that imply otherwise. */
+.workspace-item { cursor: default; }
+.workspace-item:hover { background: var(--bg); border-color: var(--border); }
+
+.history-item .history-in { font-family: var(--mono); color: var(--text); }
+.history-item .history-out { color: var(--text-dim); margin-top: 0.15rem; font-size: 0.8rem; }
+
+.empty-note {
+  color: var(--text-faint);
+  font-size: 0.9rem;
+}
+
+/* ---------- Help page ---------- */
+
+.help-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.help-section-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.help-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.help-example {
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.help-example-math {
+  font-size: 1.2rem;
+  overflow-x: auto;
+}
+
+.help-example-note {
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.help-example-result {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 1.15rem;
+  overflow-x: auto;
+}
+
+.help-result-sep { color: var(--text-faint); }
+
+.help-result-error {
+  color: var(--error);
+  font-size: 0.85rem;
+  font-family: var(--mono);
+}
+
+/* ---------- Misc page ---------- */
+
+.misc-coming-soon .empty-note {
+  margin-top: 0.4rem;
+  margin-bottom: 1.1rem;
+}
+
+.misc-feature-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.misc-feature-list li {
+  padding: 0.6rem 0.85rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 0.92rem;
+}
+
+/* ---------- Plot page ---------- */
+
+/* The plot page trades the single-column `main` layout every other page
+   uses for a fixed-height Desmos-style split: expression list left, graph
+   right. Scoped to body.plot-page so it doesn't affect Compute's <main>. */
+.plot-page main.plot-layout {
+  max-width: 1700px;
+  height: calc(100vh - 4.5rem);
+  padding: 1.25rem;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 1.25rem;
+}
+
+/* ---------- Expression list (left) ---------- */
+
+.expr-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.expr-panel-header {
+  padding: 1.1rem 1.1rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.expr-panel-header h2 {
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.expr-panel-subtitle {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
+.expr-panel-subtitle code {
+  font-family: var(--mono);
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}
+
+.expr-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.4rem;
+}
+
+.expr-add {
+  margin: 0.4rem;
+  padding: 0.6rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.expr-add:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.expr-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.55rem 0.5rem;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.expr-row:hover {
+  background: var(--bg);
+}
+
+.expr-row.is-off-mode {
+  opacity: 0.5;
+}
+
+.expr-dot {
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  margin-top: 0.85rem;
+  cursor: pointer;
+  background: var(--dot-color, var(--border-strong));
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.expr-dot:hover:not(:disabled) { transform: scale(1.15); }
+
+.expr-dot.is-hidden {
+  background: var(--panel-bg);
+  box-shadow: inset 0 0 0 2px var(--dot-color, var(--border-strong));
+}
+
+.expr-dot.is-inert {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--border);
+  cursor: default;
+}
+
+.expr-settings-popover {
+  position: absolute;
+  top: 2.1rem;
+  left: 0.4rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 0.7rem;
+  z-index: 6;
+  width: 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.expr-settings-popover[hidden] {
+  display: none;
+}
+
+.expr-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.expr-settings-section + .expr-settings-section {
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+.expr-settings-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.expr-settings-section select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  background: var(--panel-bg);
+  color: var(--text);
+}
+
+.expr-settings-section select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.expr-settings-section .plot-range-inputs input[type="number"] {
+  font-size: 0.82rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.expr-color-swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
+}
+
+.expr-color-swatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transition: transform 0.1s ease;
+}
+
+.expr-color-swatch:hover { transform: scale(1.12); }
+
+.expr-color-swatch.is-active {
+  box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text);
+}
+
+.expr-color-popover-toggle {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.4rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.expr-color-popover-toggle:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.expr-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Compact per-row field — smaller than the Compute page's single big
+   math-field, and with mathlive's own toggle/menu icon chrome hidden so a
+   list of several rows doesn't look cluttered. */
+.expr-field {
+  display: block;
+  width: 100%;
+  font-size: 1.05rem;
+  padding: 0.5rem 0.65rem;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.expr-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.expr-field::part(virtual-keyboard-toggle),
+.expr-field::part(menu-toggle) {
+  display: none;
+}
+
+.expr-badge {
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.expr-badge.is-dim {
+  display: inline-block;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.expr-badge.is-dim.is-inactive {
+  background: var(--bg);
+  color: var(--text-faint);
+}
+
+.expr-badge.is-error {
+  color: var(--error);
+}
+
+.expr-delete {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-top: 0.55rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.expr-row:hover .expr-delete,
+.expr-row:focus-within .expr-delete {
+  opacity: 1;
+}
+
+.expr-delete:hover {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
+/* Constant slider */
+
+.expr-slider {
+  margin-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.expr-slider[hidden] {
+  display: none;
+}
+
+.expr-slider input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.expr-slider input[type="number"] {
+  width: 3.6rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  background: var(--panel-bg);
+  color: var(--text-dim);
+}
+
+.expr-slider input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------- Plot stage (right) ---------- */
+
+.plot-stage {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The graph is one card — toolbar as its (opaque) header strip, canvas
+   filling the rest below it. Not an overlay: an overlay translucently
+   covered part of the graph, which is worse than the "disconnected boxes"
+   look it was fixing. The settings/export dropdowns still float above
+   content when opened, same as any menu. */
+.plot-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.mode-toggle {
+  display: flex;
+  gap: 0.2rem;
+  background: var(--bg);
+  padding: 0.2rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mode-btn.is-active {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-sm);
+}
+
+.plot-toolbar-titles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.plot-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.plot-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.export-menu-wrap {
+  position: relative;
+}
+
+.export-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 150px;
+  z-index: 5;
+}
+
+.export-menu[hidden] {
+  display: none;
+}
+
+.export-menu button {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.export-menu button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.export-menu-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  padding: 0.35rem 0.6rem 0.15rem;
+}
+
+.export-menu-divider {
+  border-top: 1px solid var(--border);
+  margin: 0.25rem 0;
+}
+
+.graph-settings-wrap {
+  position: relative;
+}
+
+.graph-settings-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  width: 250px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  z-index: 5;
+}
+
+.graph-settings-panel[hidden] {
+  display: none;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.settings-row label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.settings-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 1rem;
+  height: 1rem;
+}
+
+.settings-row input[type="range"] {
+  accent-color: var(--accent);
+  width: 100%;
+}
+
+.settings-row select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  background: var(--panel-bg);
+  color: var(--text);
+}
+
+.settings-row select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.settings-row-pair {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.settings-row-pair > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.settings-row-pair label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.plot-range-inputs {
+  display: flex;
+  gap: 0.5rem;
+  transition: opacity 0.15s ease;
+}
+
+.plot-range-inputs.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.plot-range-inputs input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  background: var(--panel-bg);
+  color: var(--text);
+}
+
+.plot-range-inputs input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.plot-panel {
+  position: relative;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The part of the card below the toolbar — canvas, placeholder and error
+   are all layered here (not over the toolbar), so nothing graphed is ever
+   hidden under the chrome. */
+.plot-canvas-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plot-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.plot-error {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  right: 1rem;
+  z-index: 2;
+  color: var(--error);
+  background: var(--error-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 520px) {
+  header.topbar h1 { display: none; }
+  main { padding: 1.25rem 0.85rem 2.5rem; }
+  .settings-panel { width: 100%; }
+}
+
+@media (max-width: 860px) {
+  .plot-page main.plot-layout {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+  .expr-panel { max-height: 40vh; }
+  .plot-panel { min-height: 420px; }
+}
