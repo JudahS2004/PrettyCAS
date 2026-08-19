@@ -68,7 +68,7 @@ Once the venv + package install steps below are done, you don't need to build/in
 cd backend
 .venv/bin/python desktop.py
 ```
-(Windows: `.venv\Scripts\python desktop.py`)
+(Windows: `cd backend`, then `.venv\Scripts\python desktop.py`)
 
 This opens PrettyCAS in a native window directly. The Linux/Windows steps below are only for getting a permanent Start Menu / app-launcher entry.
 
@@ -79,10 +79,16 @@ Make python virtual environment in repo
 python3 -m venv backend/.venv
 ```
 
-Install packages
+Install backend packages
 ```bash
 backend/.venv/bin/pip install -r backend/requirements.txt
-cd frontend && npm install && cd ..
+```
+
+Install frontend packages
+```bash
+cd frontend
+npm install
+cd ..
 ```
 
 Run install script
@@ -97,13 +103,23 @@ Make python virtual environment in repo
 python -m venv backend\.venv
 ```
 
-Install packages
+Install backend packages
 ```powershell
 backend\.venv\Scripts\pip install -r backend\requirements.txt
-cd frontend; npm install; cd ..
+```
+
+Install frontend packages
+```powershell
+cd frontend
+npm install
+cd ..
 ```
 
 Run install script
+```powershell
+.\install-windows.ps1
+```
+If Windows blocks the script with an execution-policy error, run it once via:
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-windows.ps1
 ```
