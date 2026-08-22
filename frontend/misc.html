@@ -3,19 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PrettyCAS — Misc</title>
+  <title>PrettyCAS - Misc</title>
   <script src="./theme-init.js"></script>
   <link rel="stylesheet" href="./node_modules/mathlive/mathlive-static.css">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <canvas id="bg-fx-canvas" class="bg-fx-canvas" aria-hidden="true"></canvas>
-  <div class="bg-fx-pulse" aria-hidden="true">
-    <span class="pulse-orb pulse-orb-1"></span>
-    <span class="pulse-orb pulse-orb-2"></span>
-    <span class="pulse-orb pulse-orb-3"></span>
-  </div>
-
   <header class="topbar">
     <h1 id="app-title" title="Click to toggle debug mode">PrettyCAS</h1>
     <nav class="pages">
@@ -35,7 +29,7 @@
   <main>
     <div class="panel misc-coming-soon">
       <h2>Misc</h2>
-      <p class="empty-note">Coming soon — tools that don't fit neatly into a single equation field.</p>
+      <p class="empty-note">Coming soon. Tools that don't fit neatly into a single equation field.</p>
       <ul class="misc-feature-list">
         <li>Eigenvalues &amp; eigenvectors</li>
         <li>Cross-correlation</li>
@@ -52,7 +46,7 @@
     </aside>
   </div>
 
+  <script type="module" async src="./background-fx.js"></script>
   <script type="module" src="./misc.js"></script>
-  <script type="module" src="./background-fx.js"></script>
 </body>
 </html>

@@ -42,7 +42,21 @@ def frontend_files(filename):
     top = filename.split("/", 1)[0]
     if filename not in FRONTEND_FILES and top != "node_modules":
         abort(404)
-    return send_from_directory(FRONTEND_ROOT, filename)
+    # node_modules (MathLive/compute-engine/Plotly) is vendored and only
+    # ever changes via an explicit `npm install`, unlike the app's own
+    # files above, which get edited constantly during development and need
+    # every reload to see the latest version. Flask's default here is
+    # "Cache-Control: no-cache" — not "don't cache", but "revalidate with
+    # the server before reusing it" — so the browser still round-trips on
+    # every single page navigation for the exact same multi-MB library
+    # bundle. A real max-age lets it skip that entirely (and gives the
+    # browser's JS engine a real shot at reusing its compiled-bytecode
+    # cache for the same script across navigations, not just the raw
+    # bytes) — the fix that actually matters for a multi-page app like
+    # this one, where the same handful of large vendor scripts get
+    # re-requested on every Compute/Plot/Help/Misc switch.
+    max_age = 86400 if top == "node_modules" else None
+    return send_from_directory(FRONTEND_ROOT, filename, max_age=max_age)
 
 
 @app.post("/api/compute")

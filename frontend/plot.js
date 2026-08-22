@@ -42,6 +42,161 @@ const ce = new ComputeEngine();
 ce.declare({ f: 'function', g: 'function', h: 'function' });
 globalThis.MathfieldElement.computeEngine = ce;
 
+// See app.js: every canonicalization pass except "Divide", which otherwise
+// eagerly rounds a "1/<decimal>" division (e.g. 1/3.3487) to a fixed
+// 21-digit approximation before it ever reaches the backend's exact
+// arithmetic.
+const PARSE_CANONICAL = ['InvisibleOperator', 'Number', 'Multiply', 'Add', 'Power', 'Flatten', 'Order'];
+
+// See app.js: MathLive's "dx"/"dy"/"dt" inline shortcut expands to
+// "\differentialD x" etc., which compute-engine's LaTeX parser doesn't
+// recognize at all. Swapping it back to a literal "d" before parsing (the
+// field itself keeps showing the prettier upright d) is what keeps that
+// from becoming a syntax error.
+function normalizeLatex(latex) {
+  return wrapLeibnizArguments(latex.replace(/\\differentialD\s*/g, 'd'));
+}
+
+// See app.js: compute-engine's LaTeX parser treats "\frac{d}{dx}" as a
+// prefix operator that greedily consumes the rest of the enclosing
+// additive chain instead of binding only to the single term right after
+// it - both "\frac{d}{dx}\left(\sin(x)\right)+1" and the parenthesis-free
+// "\frac{d}{dx}\sin(x)+2" silently parse as D(sin(x)+1, x) / D(sin(x)+2,
+// x), where the trailing term then vanishes (derivative of a constant is
+// 0). Wrapping just the one atom right after "d/dx" - a function call, a
+// bare symbol, a power, ... - together with the "\frac{d}{dx}" itself in
+// one more explicit "\left( \right)" gives the parser a boundary it does
+// respect.
+function findMatchingBrace(latex, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < latex.length; i++) {
+    if (latex[i] === '{') depth++;
+    else if (latex[i] === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function findMatchingParen(latex, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < latex.length; i++) {
+    if (latex[i] === '(') depth++;
+    else if (latex[i] === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function findMatchingRight(latex, leftIdx) {
+  let depth = 0;
+  let i = leftIdx;
+  while (i < latex.length) {
+    if (latex.startsWith('\\left', i)) {
+      depth++;
+      i += 5;
+    } else if (latex.startsWith('\\right', i)) {
+      depth--;
+      i += 6;
+      if (depth === 0) return latex[i] === '\\' ? i + 2 : i + 1;
+    } else {
+      i++;
+    }
+  }
+  return -1;
+}
+
+function skipWs(latex, i) {
+  while (i < latex.length && /\s/.test(latex[i])) i++;
+  return i;
+}
+
+// Finds the end of the single "atom" starting at pos: an optional function
+// command (\sin, \ln, \operatorname{f}, \sqrt[n]{...}, ...) followed by its
+// argument group ("\left(\right)", "(...)", "{...}", or a single bare
+// symbol/digit), plus a trailing "^..." exponent if present. This mirrors
+// just enough of LaTeX's primary-expression grammar to find where the
+// term right after "\frac{d}{dx}" ends, without needing a full parser.
+function consumeAtom(latex, pos) {
+  let i = skipWs(latex, pos);
+  const start = i;
+  const cmdMatch = /^\\[a-zA-Z]+/.exec(latex.slice(i));
+  if (cmdMatch) {
+    i += cmdMatch[0].length;
+    if (cmdMatch[0] === '\\operatorname') {
+      i = skipWs(latex, i);
+      if (latex[i] === '{') i = findMatchingBrace(latex, i) + 1;
+    }
+    i = skipWs(latex, i);
+    if (cmdMatch[0] === '\\sqrt' && latex[i] === '[') {
+      const close = latex.indexOf(']', i);
+      if (close !== -1) i = skipWs(latex, close + 1);
+    }
+  }
+  i = skipWs(latex, i);
+  if (latex.startsWith('\\left', i)) {
+    const end = findMatchingRight(latex, i);
+    if (end !== -1) i = end;
+  } else if (latex[i] === '(') {
+    const end = findMatchingParen(latex, i);
+    if (end !== -1) i = end + 1;
+  } else if (latex[i] === '{') {
+    const end = findMatchingBrace(latex, i);
+    if (end !== -1) i = end + 1;
+  } else if (cmdMatch) {
+    // bare command with no argument group, e.g. "\pi"
+  } else if (/[a-zA-Z0-9]/.test(latex[i] || '')) {
+    i++;
+  } else {
+    return start; // nothing recognizable to consume
+  }
+  const afterExp = skipWs(latex, i);
+  if (latex[afterExp] === '^') {
+    let j = skipWs(latex, afterExp + 1);
+    if (latex[j] === '{') {
+      const end = findMatchingBrace(latex, j);
+      if (end !== -1) i = end + 1;
+    } else if (latex[j] === '\\') {
+      const m = /^\\[a-zA-Z]+/.exec(latex.slice(j));
+      i = j + (m ? m[0].length : 1);
+    } else if (j < latex.length) {
+      i = j + 1;
+    }
+  }
+  return i;
+}
+
+function wrapLeibnizArguments(latex) {
+  const marker = '\\frac{d}{d';
+  let result = '';
+  let searchFrom = 0;
+  while (true) {
+    const fracStart = latex.indexOf(marker, searchFrom);
+    if (fracStart === -1) {
+      result += latex.slice(searchFrom);
+      return result;
+    }
+    const denomCloseBrace = findMatchingBrace(latex, fracStart + 8);
+    if (denomCloseBrace === -1) {
+      result += latex.slice(searchFrom, fracStart + marker.length);
+      searchFrom = fracStart + marker.length;
+      continue;
+    }
+    const argStart = skipWs(latex, denomCloseBrace + 1);
+    const argEnd = consumeAtom(latex, denomCloseBrace + 1);
+    if (argEnd <= argStart) {
+      result += latex.slice(searchFrom, denomCloseBrace + 1);
+      searchFrom = denomCloseBrace + 1;
+      continue;
+    }
+    result += latex.slice(searchFrom, fracStart) + '\\left(' + latex.slice(fracStart, argEnd) + '\\right)';
+    searchFrom = argEnd;
+  }
+}
+
 const exprListEl = document.getElementById('expr-list');
 const addExprBtn = document.getElementById('add-expr');
 const modeButtons = [...document.querySelectorAll('.mode-btn')];
@@ -62,6 +217,9 @@ let colorIndex = 0;
 let rows = [];
 let currentConstants = {};
 let hasPlotted = false;
+// The surface grid size (settings3d.resolution, capped) most recently handed
+// to Plotly for a 3D surface — see redraw()'s use of it below.
+let lastSurfaceGridN = null;
 
 const settings2d = {
   xMin: -10, xMax: 10, xScale: 'linear',
@@ -370,7 +528,7 @@ async function fetchImplicitSolve(row, cacheKey, target, domainVar, constantValu
 
   let mathjson;
   try {
-    mathjson = JSON.parse(row.mf.getValue('math-json'));
+    mathjson = ce.parse(normalizeLatex(row.mf.getValue('latex')), { canonical: PARSE_CANONICAL }).json;
   } catch (err) {
     if (isStale()) return;
     row._implicitCache = { key: cacheKey, state: 'error', message: `Couldn't read this expression: ${err.message || err}` };
@@ -413,7 +571,7 @@ async function fetchImplicitSolve(row, cacheKey, target, domainVar, constantValu
     // Backend returns "<name> = <expr>" per branch; only the expr matters.
     const rhsLatex = branchLatex.includes('=') ? branchLatex.slice(branchLatex.indexOf('=') + 1) : branchLatex;
     try {
-      const branchExpr = ce.parse(rhsLatex);
+      const branchExpr = ce.parse(rhsLatex, { canonical: PARSE_CANONICAL });
       const branchVars = [...new Set(branchExpr.unknowns)].filter((v) => !(v in constantValues));
       if (branchVars.length !== 1) continue; // shouldn't happen; skip rather than crash the row
       branches.push({ vars: branchVars, mathjson: branchExpr.json });
@@ -475,7 +633,7 @@ function classifyRows() {
     }
     let parsed = null;
     try {
-      parsed = ce.parse(latex);
+      parsed = ce.parse(normalizeLatex(latex), { canonical: PARSE_CANONICAL });
     } catch {
       parsed = null;
     }
@@ -947,6 +1105,7 @@ function redraw() {
   if (activeRows.length === 0) {
     if (hasPlotted) Plotly.purge(plotDiv);
     hasPlotted = false;
+    lastSurfaceGridN = null;
     plotDiv.hidden = true;
     plotError.hidden = true;
     const anyPlots = rows.some((r) => r.kind === 'plot');
@@ -992,10 +1151,31 @@ function redraw() {
   plotDiv.hidden = false;
   plotPlaceholder.hidden = true;
   plotError.hidden = true;
-  // Plotly.react's promise can reject from async WebGL/render failures
-  // (a common source of an opaque "null" error, especially for 3D surfaces
-  // in some GPU/driver setups) that a synchronous try/catch wouldn't see.
-  Plotly.react(plotDiv, traces, layout, PLOTLY_CONFIG)
+
+  // Plotly's WebGL gl3d surface renderer can leave stale, misaligned GPU
+  // buffers when Plotly.react() hands it a surface trace whose z grid is a
+  // different size than the one already on screen (e.g. dragging the
+  // Resolution slider) — the update lands as a jumble of spiky, torn
+  // triangles instead of a clean re-tessellation, because react() tries to
+  // patch the existing buffers in place rather than reallocating them. A
+  // full Plotly.newPlot() forces that reallocation. The current camera is
+  // carried over into the new layout first so an incidental resolution
+  // change mid-orbit doesn't also reset the view.
+  const surfaceN = mode === '3d' ? Math.max(Math.min(settings3d.resolution, SURFACE_RESOLUTION_CAP), 2) : null;
+  const needsFullRecreate = mode === '3d' && hasPlotted && surfaceN !== lastSurfaceGridN;
+  lastSurfaceGridN = surfaceN;
+  if (needsFullRecreate && plotDiv.layout?.scene?.camera) {
+    layout.scene.camera = plotDiv.layout.scene.camera;
+  }
+
+  // Plotly.react's/newPlot's promise can reject from async WebGL/render
+  // failures (a common source of an opaque "null" error, especially for 3D
+  // surfaces in some GPU/driver setups) that a synchronous try/catch
+  // wouldn't see.
+  const renderPromise = needsFullRecreate
+    ? Plotly.newPlot(plotDiv, traces, layout, PLOTLY_CONFIG)
+    : Plotly.react(plotDiv, traces, layout, PLOTLY_CONFIG);
+  renderPromise
     .then(() => { hasPlotted = true; })
     .catch((err) => {
       hasPlotted = false;

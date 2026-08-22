@@ -34,6 +34,12 @@ export function clearHistory() {
   render();
 }
 
+function deleteEntry(index) {
+  entries = entries.filter((_, i) => i !== index);
+  save();
+  render();
+}
+
 // Wires the <details class="history"> block in the page: renders existing
 // entries, wires the Clear button, and calls `onReuse(inputLatex)` when a
 // past entry is clicked.
@@ -57,14 +63,23 @@ function render() {
     .map(
       (entry, i) => `
       <div class="history-item" data-index="${i}">
-        <div class="history-in">${escapeHtml(entry.inputLatex)}</div>
-        <div class="history-out">${escapeHtml(entry.summary)} · ${entry.when}</div>
+        <div class="history-item-body">
+          <div class="history-in">${escapeHtml(entry.inputLatex)}</div>
+          <div class="history-out">${escapeHtml(entry.summary)} · ${entry.when}</div>
+        </div>
+        <button type="button" class="item-delete" data-index="${i}" title="Delete entry" aria-label="Delete entry">&times;</button>
       </div>`
     )
     .join("");
 
   listEl.querySelectorAll(".history-item").forEach((el) => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (event) => {
+      const deleteBtn = event.target.closest(".item-delete");
+      if (deleteBtn) {
+        event.stopPropagation();
+        deleteEntry(Number(deleteBtn.dataset.index));
+        return;
+      }
       const entry = entries[Number(el.dataset.index)];
       if (entry && onReuse) onReuse(entry.inputLatex);
     });

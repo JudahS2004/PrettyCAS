@@ -1,7 +1,16 @@
 :root {
   --bg: #eef0f6;
-  --bg-accent: #e4e8fb;
   --panel-bg: #ffffff;
+  /* How opaque the input/output/history/workspace "bubbles" are — set from
+     the settings panel's Panel transparency slider. 100% = current solid
+     look; anything lower lets the animated background show through them. */
+  --panel-alpha: 100%;
+  /* Backdrop blur behind a translucent panel, from the Panel blur slider.
+     Only visible once --panel-alpha is below 100%. Set to the literal
+     keyword "none" (not blur(0px)) when the slider is at 0 — see
+     settings.js/theme-init.js for why. */
+  --panel-backdrop: blur(10px);
+  --panel-backdrop-topbar: saturate(180%) blur(10px);
   --border: #e1e3ec;
   --border-strong: #c9cce0;
   --text: #1b1d29;
@@ -19,6 +28,15 @@
   --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--panel-bg));
   --accent-text: #ffffff;
 
+  /* A muted, analogous partner to --accent — same derive-from-h/s/l trick,
+     shifted round the wheel and pulled toward lower saturation/higher
+     lightness so it reads as a quiet second tone rather than a competing
+     accent. Used sparingly: the PrettyCAS wordmark's gradient, not general UI. */
+  --accent-secondary-h: calc(var(--accent-h) + 40);
+  --accent-secondary-s: calc(var(--accent-s) * 0.5);
+  --accent-secondary-l: calc(var(--accent-l) + 10%);
+  --accent-secondary: hsl(var(--accent-secondary-h) var(--accent-secondary-s) var(--accent-secondary-l));
+
   --error: #d1453b;
   --error-soft: #fdecea;
   --success: #1a9c6e;
@@ -32,13 +50,16 @@
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Inter", sans-serif;
 }
 
-/* Accent themes: pick from the settings panel's color swatches. */
-[data-accent="indigo"]  { --accent-h: 243; --accent-s: 100%; --accent-l: 66%; }
-[data-accent="crimson"] { --accent-h: 4;   --accent-s: 78%;  --accent-l: 54%; }
-[data-accent="sand"]    { --accent-h: 34;  --accent-s: 48%;  --accent-l: 46%; }
-[data-accent="emerald"] { --accent-h: 152; --accent-s: 55%;  --accent-l: 38%; }
-[data-accent="violet"]  { --accent-h: 271; --accent-s: 62%;  --accent-l: 58%; }
-[data-accent="slate"]   { --accent-h: 215; --accent-s: 16%;  --accent-l: 42%; }
+/* Accent themes: pick from the settings panel's color swatches. Full 100%
+   saturation on every chromatic one so each reads as a hard, pure hue
+   (blue ~#006aff, red pure #ff0000, purple ~#8400ff, green ~#00cc4b,
+   orange ~#ff7700) instead of a muted/pastel tint. */
+[data-accent="blue"]   { --accent-h: 215; --accent-s: 100%; --accent-l: 50%; }
+[data-accent="red"]    { --accent-h: 0;   --accent-s: 100%; --accent-l: 50%; }
+[data-accent="purple"] { --accent-h: 271; --accent-s: 100%; --accent-l: 50%; }
+[data-accent="green"]  { --accent-h: 142; --accent-s: 100%; --accent-l: 40%; }
+[data-accent="orange"] { --accent-h: 28;  --accent-s: 100%; --accent-l: 50%; }
+[data-accent="black"]  { --accent-h: 0; --accent-s: 0%; --accent-l: 8%; }
 
 /* Arbitrary accent picked via the settings panel's color input.
    --accent-hover is overridden explicitly since (unlike --accent-soft) it
@@ -48,7 +69,34 @@
 [data-accent="custom"] {
   --accent: var(--accent-custom, #4f5bff);
   --accent-hover: color-mix(in srgb, var(--accent-custom, #4f5bff) 85%, black);
+  /* No h/s/l breakdown exists for an arbitrary hex, so --accent-secondary's
+     usual hue-shift formula can't apply here — a straight tint toward white
+     stands in instead. */
+  --accent-secondary: color-mix(in srgb, var(--accent-custom, #4f5bff) 60%, white 40%);
 }
+
+/* An explicit secondary-accent color picked in Settings wins over both of
+   the derivations above (auto-formula or custom-accent tint). Scored on
+   :root plus an attribute, so it outranks the single-attribute selectors
+   above regardless of source order — no !important needed. */
+:root[data-accent-secondary="custom"] {
+  --accent-secondary: var(--accent-secondary-custom, #8a5bff);
+}
+
+/* The six fixed secondary-accent presets — same override precedence as
+   "custom" above, just a literal color instead of the picker's variable.
+   Each sits at the color-wheel hue halfway between two adjacent primary
+   accents (blue-red-purple-green-orange-black, wrapping around), so the
+   secondary list reads as "one step off" from whichever primary you pick.
+   Black has no hue of its own, so its two neighboring gaps (orange-black,
+   black-blue) use a desaturated, darkened version of the chromatic side
+   instead of an actual hue midpoint. */
+:root[data-accent-secondary="orchid"] { --accent-secondary: hsl(290 55% 64%); } /* between blue and red */
+:root[data-accent-secondary="rose"]   { --accent-secondary: hsl(318 55% 66%); } /* between red and purple */
+:root[data-accent-secondary="cyan"]   { --accent-secondary: hsl(207 50% 58%); } /* between purple and green */
+:root[data-accent-secondary="olive"]  { --accent-secondary: hsl(85  45% 46%); } /* between green and orange */
+:root[data-accent-secondary="bronze"] { --accent-secondary: hsl(28  32% 32%); } /* between orange and black */
+:root[data-accent-secondary="slate"]  { --accent-secondary: hsl(215 28% 30%); } /* between black and blue */
 
 /* There's no separate light/dark "theme" setting — only a background color
    (system-default or custom). When no custom background is picked, the
@@ -56,7 +104,6 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-custom-bg="true"]) {
     --bg: #14151f;
-    --bg-accent: #1c1d30;
   }
 }
 
@@ -65,7 +112,6 @@
    so source order decides). */
 :root[data-custom-bg="true"] {
   --bg: var(--bg-custom, #eef0f6);
-  --bg-accent: var(--bg-custom, #eef0f6);
 }
 
 /* Panel/text/border/shadow tokens don't follow their own light/dark
@@ -95,7 +141,42 @@
 :root[data-bg-tone="light"] { color-scheme: light; }
 :root[data-bg-tone="dark"] { color-scheme: dark; }
 
+/* Settings panel's "Square corners" toggle: sharpens every element built
+   from --radius/--radius-sm (inputs, buttons, the input/output/history/
+   workspace panels, ...) to 0px, plus the page-nav and 2D/3D pill toggles
+   explicitly below (they're built from a fixed 999px, not --radius).
+   Deliberately leaves the small round shapes alone — badges/chips, color
+   swatches, circular icon buttons — those read as tags/dots rather than
+   boxes and stay round regardless of the box-corner theme. */
+:root[data-corners="square"] {
+  --radius: 0px;
+  --radius-sm: 0px;
+}
+
+/* The top nav (Compute/Plot/Help) and the Plot page's 2D/3D switch are
+   pill-shaped (999px) rather than built from --radius, so the toggle above
+   doesn't reach them on its own — square them explicitly too. */
+:root[data-corners="square"] nav.pages,
+:root[data-corners="square"] nav.pages a,
+:root[data-corners="square"] .mode-toggle,
+:root[data-corners="square"] .mode-btn {
+  border-radius: 0;
+}
+
 * { box-sizing: border-box; }
+
+/* Browsers (Firefox especially) draw their own default focus ring — a
+   dotted outline — on plain buttons, links, and other controls that don't
+   set their own focus style. Text inputs/selects/the math field already
+   replace that with an accent box-shadow ring (see their own :focus rules
+   below, which win on specificity and so still apply over this). This
+   catch-all just gives everything else — buttons, swatches, tabs, radio/
+   checkbox labels — that same solid accent ring instead of the dotted
+   default, so focus indication looks like one consistent system. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* The page background lives on html, not body: html's background is always
    unambiguously what paints the actual document canvas, at the very back
@@ -104,9 +185,7 @@
    sit in front of (not behind) a position:fixed, negative-z-index child of
    body like the effects layer below, hiding it entirely. */
 html {
-  background:
-    radial-gradient(1200px 500px at 15% -10%, var(--bg-accent), transparent),
-    var(--bg);
+  background: var(--bg);
   transition: background-color 0.15s ease;
 }
 
@@ -121,63 +200,19 @@ body {
 
 /* ---------- Background effects ---------- */
 
-.bg-fx-canvas,
-.bg-fx-pulse {
+.bg-fx-canvas {
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
 }
 
-/* .bg-fx-canvas is shared by every canvas-drawn effect (matrix/circuit/
-   spiral) — background-fx.js picks which one draws to it, so this only
-   needs to hide it for the non-canvas states. */
-:root[data-bg-fx="none"] .bg-fx-canvas,
-:root[data-bg-fx="pulse"] .bg-fx-canvas { display: none; }
-:root:not([data-bg-fx="pulse"]) .bg-fx-pulse { display: none; }
+/* .bg-fx-canvas is shared by every canvas-drawn effect (matrix/grid/
+   spiral/orbs). background-fx.js picks which one draws to it, so this only
+   needs to hide it for the non-canvas "none" state. */
+:root[data-bg-fx="none"] .bg-fx-canvas { display: none; }
 
 .bg-fx-canvas { opacity: 0.55; }
-
-.bg-fx-pulse { overflow: hidden; }
-
-.pulse-orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(70px);
-  opacity: 0.45;
-  animation: pulse-float 18s ease-in-out infinite;
-}
-
-.pulse-orb-1 {
-  width: 42vw;
-  height: 42vw;
-  top: -12%;
-  left: -10%;
-  background: var(--accent);
-}
-
-.pulse-orb-2 {
-  width: 34vw;
-  height: 34vw;
-  bottom: -14%;
-  right: -8%;
-  background: color-mix(in srgb, var(--accent) 60%, white 40%);
-  animation-delay: -6s;
-}
-
-.pulse-orb-3 {
-  width: 30vw;
-  height: 30vw;
-  top: 42%;
-  left: 58%;
-  background: var(--accent-hover);
-  animation-delay: -12s;
-}
-
-@keyframes pulse-float {
-  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.35; }
-  50% { transform: translate(5%, 7%) scale(1.15); opacity: 0.55; }
-}
 
 /* ---------- Topbar ---------- */
 
@@ -186,8 +221,8 @@ header.topbar {
   align-items: center;
   gap: 1rem;
   padding: 0.9rem 1.5rem;
-  background: color-mix(in srgb, var(--panel-bg) 85%, transparent);
-  backdrop-filter: saturate(180%) blur(12px);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop-topbar);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
@@ -201,7 +236,7 @@ header.topbar h1 {
   margin: 0;
   margin-right: auto;
   padding: 0.2rem 0;
-  background: linear-gradient(135deg, var(--accent), #8a5bff);
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -256,7 +291,8 @@ nav.pages a[aria-current="page"] {
 
 button.icon-button {
   border: 1px solid var(--border);
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border-radius: var(--radius-sm);
   width: 2.35rem;
   height: 2.35rem;
@@ -279,7 +315,8 @@ button.icon-button:hover {
   position: absolute;
   top: 2.7rem;
   right: 0;
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
@@ -318,7 +355,8 @@ main {
 }
 
 .panel {
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.25rem;
@@ -334,7 +372,8 @@ math-field {
   border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: 0.85rem 1rem;
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -369,7 +408,7 @@ math-field:focus-within {
 }
 
 .quick-toggles { margin-top: 0.75rem; gap: 0.5rem; }
-.quick-toggles .copy-btn { margin-left: auto; }
+.quick-toggles #clear-input { margin-left: auto; }
 
 /* A single button per setting that states its current value and cycles to
    the next one on click, instead of a segmented control showing every
@@ -425,7 +464,8 @@ button.primary:hover { background: var(--accent-hover); box-shadow: var(--shadow
 button.primary:active { transform: translateY(1px); }
 
 button.secondary {
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: 0.6rem 1rem;
@@ -436,7 +476,13 @@ button.secondary {
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-button.secondary:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+/* Hovers into --accent-secondary rather than --accent: it's the
+   "secondary" button, so it takes the app's secondary accent color. */
+button.secondary:hover {
+  background: color-mix(in srgb, var(--accent-secondary) 14%, var(--panel-bg));
+  border-color: var(--accent-secondary);
+  color: var(--accent-secondary);
+}
 
 /* Subtle "just say Copy" buttons — a ghost link rather than a bordered
    button, so they read as a small utility action, not a primary control. */
@@ -461,8 +507,6 @@ button.secondary:hover { background: var(--accent-soft); border-color: var(--acc
   transition: border-color 0.15s ease;
   min-height: 5rem;
 }
-
-.output-panel[data-mode="idle"] { border-style: dashed; }
 
 .output-panel[data-mode="error"] {
   border-color: var(--error);
@@ -599,7 +643,8 @@ pre.output-debug {
   bottom: 0;
   width: 320px;
   max-width: 90vw;
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border-left: 1px solid var(--border);
   padding: 1.5rem;
   transform: translateX(100%);
@@ -615,6 +660,34 @@ pre.output-debug {
   font-weight: 700;
   margin-top: 0;
   margin-bottom: 1.25rem;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.6rem 0.3rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.settings-tab-btn:hover { color: var(--text-dim); }
+
+.settings-tab-btn.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 .settings-group {
@@ -711,22 +784,19 @@ pre.output-debug {
   mix-blend-mode: difference;
 }
 
-.swatch[data-accent-preset="indigo"]  { background: hsl(243 100% 66%); }
-.swatch[data-accent-preset="crimson"] { background: hsl(4 78% 54%); }
-.swatch[data-accent-preset="sand"]    { background: hsl(34 48% 46%); }
-.swatch[data-accent-preset="emerald"] { background: hsl(152 55% 38%); }
-.swatch[data-accent-preset="violet"]  { background: hsl(271 62% 58%); }
-.swatch[data-accent-preset="slate"]   { background: hsl(215 16% 42%); }
+.swatch[data-accent-preset="blue"]   { background: hsl(215 100% 50%); }
+.swatch[data-accent-preset="red"]    { background: hsl(0 100% 50%); }
+.swatch[data-accent-preset="purple"] { background: hsl(271 100% 50%); }
+.swatch[data-accent-preset="green"]  { background: hsl(142 100% 40%); }
+.swatch[data-accent-preset="orange"] { background: hsl(28 100% 50%); }
+.swatch[data-accent-preset="black"]  { background: hsl(0 0% 8%); }
 
-.swatch-reset {
-  background: var(--panel-bg);
-  color: var(--text-faint);
-  font-size: 0.95rem;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+.swatch[data-accent-secondary-preset="orchid"] { background: hsl(290 55% 64%); }
+.swatch[data-accent-secondary-preset="rose"]   { background: hsl(318 55% 66%); }
+.swatch[data-accent-secondary-preset="cyan"]   { background: hsl(207 50% 58%); }
+.swatch[data-accent-secondary-preset="olive"]  { background: hsl(85 45% 46%); }
+.swatch[data-accent-secondary-preset="bronze"] { background: hsl(28 32% 32%); }
+.swatch[data-accent-secondary-preset="slate"]  { background: hsl(215 28% 30%); }
 
 /* Native color picker, reshaped to sit flush with the round swatches. */
 .color-picker {
@@ -750,9 +820,12 @@ pre.output-debug {
 .color-picker::-webkit-color-swatch { border: none; border-radius: 50%; }
 .color-picker::-moz-color-swatch { border: none; border-radius: 50%; }
 
-/* Decimal-places slider + custom amount */
-
-.decimals-control {
+/* Shared layout for any "slider + a value next to it" row (decimal places,
+   panel transparency, ...). Kept separate from .decimals-control below,
+   which is only about disabling *that one* row in standard/exact mode —
+   stacking both classes on the decimals row is what scopes that dimming to
+   just it, instead of catching every .slider-control on the panel. */
+.slider-control {
   display: flex;
   align-items: center;
   gap: 0.7rem;
@@ -765,12 +838,12 @@ pre.output-debug {
   pointer-events: none;
 }
 
-.decimals-control input[type="range"] {
+.slider-control input[type="range"] {
   flex: 1;
   accent-color: var(--accent);
 }
 
-.decimals-control input[type="number"] {
+.slider-control input[type="number"] {
   width: 4.5rem;
   flex-shrink: 0;
   padding: 0.35rem 0.5rem;
@@ -781,17 +854,27 @@ pre.output-debug {
   color: var(--text);
 }
 
-.decimals-control input[type="number"]:focus,
-.decimals-control input[type="range"]:focus-visible {
+.slider-control input[type="number"]:focus,
+.slider-control input[type="range"]:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.panel-opacity-value,
+.panel-blur-value {
+  flex-shrink: 0;
+  min-width: 3rem;
+  text-align: right;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
 /* ---------- History ---------- */
 
 details.history {
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.9rem 1.1rem;
@@ -834,6 +917,10 @@ details.history[open] summary::before { transform: rotate(90deg); }
 }
 
 .history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.55rem 0.75rem;
@@ -845,6 +932,8 @@ details.history[open] summary::before { transform: rotate(90deg); }
 
 .history-item:hover { background: var(--accent-soft); border-color: var(--accent); }
 
+.history-item-body { min-width: 0; flex: 1; }
+
 /* Workspace entries aren't click-to-reuse like history entries are — reset
    the affordances that imply otherwise. */
 .workspace-item { cursor: default; }
@@ -852,6 +941,34 @@ details.history[open] summary::before { transform: rotate(90deg); }
 
 .history-item .history-in { font-family: var(--mono); color: var(--text); }
 .history-item .history-out { color: var(--text-dim); margin-top: 0.15rem; font-size: 0.8rem; }
+
+/* Per-entry delete button, same hover-to-reveal treatment as the Plot
+   page's .expr-delete so removing a history/workspace entry works the
+   same way removing a plot expression row already does. */
+.item-delete {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.history-item:hover .item-delete,
+.history-item:focus-within .item-delete {
+  opacity: 1;
+}
+
+.item-delete:hover {
+  background: var(--error-soft);
+  color: var(--error);
+}
 
 .empty-note {
   color: var(--text-faint);
@@ -884,7 +1001,14 @@ details.history[open] summary::before { transform: rotate(90deg); }
   padding: 0.7rem 0.9rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg);
+  /* A "recessed well" one shade darker than the surrounding .panel, so it
+     was solid --bg while the panel around it (see .panel above) turned
+     translucent under the transparency slider — a flat opaque (near-black
+     in dark mode) square sitting inside an otherwise see-through card.
+     Applying the same panel-alpha/panel-blur keeps it recessed but in step
+     with everything else. */
+  background: color-mix(in srgb, var(--bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
 }
 
 .help-example-math {
@@ -960,7 +1084,8 @@ details.history[open] summary::before { transform: rotate(90deg); }
 /* ---------- Expression list (left) ---------- */
 
 .expr-panel {
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
@@ -1068,7 +1193,8 @@ details.history[open] summary::before { transform: rotate(90deg); }
   position: absolute;
   top: 2.1rem;
   left: 0.4rem;
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
@@ -1177,7 +1303,8 @@ details.history[open] summary::before { transform: rotate(90deg); }
   padding: 0.5rem 0.65rem;
   border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -1290,13 +1417,27 @@ details.history[open] summary::before { transform: rotate(90deg); }
    covered part of the graph, which is worse than the "disconnected boxes"
    look it was fixing. The settings/export dropdowns still float above
    content when opened, same as any menu. */
+/* Explicit position+z-index (rather than leaving it z-index:auto) is load
+   bearing here. This element's own backdrop-filter already makes it a
+   stacking context by itself; without a z-index that context paints as
+   z-index:0, and — being earlier in the DOM than the sibling
+   .plot-canvas-area holding Plotly's WebGL canvas — an auto/0 context
+   paints BEHIND a later sibling. That trapped the export/graph-settings
+   dropdowns nested inside this toolbar underneath the plot regardless of
+   their own z-index, since a descendant's z-index only ever competes
+   within its nearest ancestor stacking context, never past it. Giving the
+   toolbar itself a z-index above the canvas area's (auto) is what actually
+   lets its dropdowns render on top of the plot. */
 .plot-toolbar {
+  position: relative;
+  z-index: 2;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 1rem;
   padding: 0.65rem 0.85rem;
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border-bottom: 1px solid var(--border);
   border-radius: var(--radius) var(--radius) 0 0;
 }
@@ -1365,7 +1506,8 @@ details.history[open] summary::before { transform: rotate(90deg); }
   position: absolute;
   top: calc(100% + 0.4rem);
   right: 0;
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
@@ -1419,7 +1561,8 @@ details.history[open] summary::before { transform: rotate(90deg); }
   position: absolute;
   top: calc(100% + 0.5rem);
   right: 0;
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
@@ -1526,7 +1669,8 @@ details.history[open] summary::before { transform: rotate(90deg); }
 
 .plot-panel {
   position: relative;
-  background: var(--panel-bg);
+  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  backdrop-filter: var(--panel-backdrop);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);

@@ -13,6 +13,6 @@
   "dependencies": {
     "@cortex-js/compute-engine": "^0.111.0",
     "mathlive": "^0.110.0",
-    "plotly.js-dist-min": "^3.7.0"
+    "plotly.js-gl3d-dist-min": "^3.7.0"
   }
 }

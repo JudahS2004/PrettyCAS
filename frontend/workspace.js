@@ -22,6 +22,11 @@ export function clearWorkspace() {
   render();
 }
 
+function deleteVar(name) {
+  vars.delete(name);
+  render();
+}
+
 let listEl = null;
 
 // Wires the <details class="history" id="workspace"> block in the page:
@@ -42,11 +47,21 @@ function render() {
     .map(
       ([name, value]) => `
       <div class="history-item workspace-item">
-        <div class="history-in">${escapeHtml(name)}</div>
-        <div class="history-out">${escapeHtml(formatValue(value))}</div>
+        <div class="history-item-body">
+          <div class="history-in">${escapeHtml(name)}</div>
+          <div class="history-out">${escapeHtml(formatValue(value))}</div>
+        </div>
+        <button type="button" class="item-delete" data-name="${escapeHtml(name)}" title="Delete variable" aria-label="Delete variable">&times;</button>
       </div>`
     )
     .join("");
+
+  listEl.querySelectorAll(".item-delete").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteVar(btn.dataset.name);
+    });
+  });
 }
 
 // Full double precision is kept in `vars` (so it stays as accurate as

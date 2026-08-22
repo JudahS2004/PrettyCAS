@@ -168,6 +168,13 @@ OPS = {
     "Complex": lambda re, im: re + im * sp.I,
     "Power": sp.Pow, "Sqrt": sp.sqrt, "Root": lambda a, n: sp.root(a, n),
     "Sin": sp.sin, "Cos": sp.cos, "Tan": sp.tan,
+    "Csc": sp.csc, "Sec": sp.sec, "Cot": sp.cot,
+    "Sinh": sp.sinh, "Cosh": sp.cosh, "Tanh": sp.tanh,
+    "Csch": sp.csch, "Sech": sp.sech, "Coth": sp.coth,
+    "Arcsin": sp.asin, "Arccos": sp.acos, "Arctan": sp.atan,
+    "Arccsc": sp.acsc, "Arcsec": sp.asec, "Arccot": sp.acot,
+    "Arsinh": sp.asinh, "Arcosh": sp.acosh, "Artanh": sp.atanh,
+    "Arcsch": sp.acsch, "Arsech": sp.asech, "Arcoth": sp.acoth,
     "Ln": sp.log, "Log": lambda a, b=10: sp.log(a, b),
     "Exp": sp.exp, "Abs": sp.Abs,
     # Wired to sympy's real implementations (not left to the undefined-function
@@ -216,7 +223,25 @@ OPS = {
 }
 
 # Ops whose argument is an angle, for degree-mode conversion below.
-_ANGLE_OPS = {"Sin", "Cos", "Tan"}
+_ANGLE_OPS = {"Sin", "Cos", "Tan", "Csc", "Sec", "Cot"}
+# Inverse trig ops whose *result* is an angle: in degree mode the radian
+# result they naturally produce is converted back to degrees on the way out
+# (the mirror image of _ANGLE_OPS converting an incoming degree argument to
+# radians). Inverse hyperbolic ops aren't included — their argument and
+# result are both plain numbers, no angle involved.
+_INVERSE_ANGLE_OPS = {"Arcsin", "Arccos", "Arctan", "Arccsc", "Arcsec", "Arccot"}
+
+# \int_a^b, \sum, and \prod all take their bound variable + lower/upper as
+# their last argument. compute-engine's LaTeX parser encodes that as a bare
+# ["Tuple", var, lower, upper] rather than the ["Limits", var, lower, upper]
+# this module (and OPS["Integrate"/"Sum"/"Product"] below) expect — but
+# OPS["Tuple"] deliberately rejects a bare Tuple anywhere else, to catch a
+# typo like "x+y=9,x=2" (missing the braces that would make it a real
+# system) rather than silently mis-solving it. This position is unambiguous
+# (it's always exactly the bound-variable triple, never user expressions),
+# so it's normalized back to "Limits" here, before that generic rejection
+# ever sees it.
+_BOUNDED_OPS = {"Integrate", "Sum", "Product"}
 
 
 def to_sympy(node, angle_mode="rad"):
@@ -231,6 +256,14 @@ def to_sympy(node, angle_mode="rad"):
         # sin(x) = 1/2 solving to pi/6) instead of falling back to a numeric
         # asin() and printing a long decimal even in exact/standard mode.
         return sp.Rational(str(node))
+    if isinstance(node, dict) and "num" in node:
+        # MathJSON's arbitrary-precision number form: a number too long to
+        # round-trip through a JS double (e.g. 1/3.3487, or a long decimal
+        # literal) arrives as {"num": "0.298623346373219458297"} instead of
+        # a bare float, to preserve every digit. sp.Rational parses the
+        # string directly (decimal or exponential form) into the same exact
+        # fraction the plain-float branch above produces.
+        return sp.Rational(str(node["num"]))
     if isinstance(node, str):
         return CONSTS.get(node, sp.Symbol(node))
     if isinstance(node, list):
@@ -245,11 +278,16 @@ def to_sympy(node, angle_mode="rad"):
             # message instead of becoming an opaque Function('Error')(...)
             # buried inside whatever expression wraps it.
             raise ValueError("couldn't understand part of this input")
+        if op in _BOUNDED_OPS and args and isinstance(args[-1], list) and args[-1][:1] == ["Tuple"]:
+            args = [*args[:-1], ["Limits", *args[-1][1:]]]
         converted = [to_sympy(a, angle_mode) for a in args]
         if op in _ANGLE_OPS and angle_mode == "deg":
             converted[0] = converted[0] * sp.pi / 180
         if op in OPS:
-            return OPS[op](*converted)
+            result = OPS[op](*converted)
+            if op in _INVERSE_ANGLE_OPS and angle_mode == "deg":
+                result = result * 180 / sp.pi
+            return result
         # Not a known operation: treat it as an application of an
         # undefined function, e.g. f(g(x)) -> Function('f')(Function('g')(x)).
         # Sympy carries these symbolically (chain rule on D, unevaluated

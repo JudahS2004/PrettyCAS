@@ -10,12 +10,6 @@
 </head>
 <body class="plot-page">
   <canvas id="bg-fx-canvas" class="bg-fx-canvas" aria-hidden="true"></canvas>
-  <div class="bg-fx-pulse" aria-hidden="true">
-    <span class="pulse-orb pulse-orb-1"></span>
-    <span class="pulse-orb pulse-orb-2"></span>
-    <span class="pulse-orb pulse-orb-3"></span>
-  </div>
-
   <header class="topbar">
     <h1 id="app-title" title="Click to toggle debug mode">PrettyCAS</h1>
     <nav class="pages">
@@ -92,8 +86,8 @@
     </aside>
   </div>
 
-  <script src="./node_modules/plotly.js-dist-min/plotly.min.js"></script>
+  <script type="module" async src="./background-fx.js"></script>
+  <script src="./node_modules/plotly.js-gl3d-dist-min/plotly-gl3d.min.js"></script>
   <script type="module" src="./plot.js"></script>
-  <script type="module" src="./background-fx.js"></script>
 </body>
 </html>

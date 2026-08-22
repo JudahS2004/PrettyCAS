@@ -40,6 +40,172 @@ const ce = new ComputeEngine();
 ce.declare({ f: 'function', g: 'function', h: 'function' });
 globalThis.MathfieldElement.computeEngine = ce;
 
+// Every canonicalization pass except "Divide". Compute-engine's default
+// "Divide" pass includes a "1/a = a^-1" rule that, for a non-integer decimal
+// like 3.3487, eagerly computes a numeric reciprocal at its default 21-digit
+// precision (e.g. "1/3.3487" becomes a rounded {num: "0.298623...458297"}
+// literal) — a fixed-precision approximation computed and baked in before
+// the expression ever reaches sympy's exact arithmetic backend. Dropping
+// just this pass leaves that kind of division as a plain ["Divide", 1,
+// 3.3487] node instead, which the backend turns into an exact fraction; the
+// other passes (integer/whole-number folding, "2x" -> Multiply(2,x), sum/
+// product ordering, etc.) are all still needed and stay on.
+const PARSE_CANONICAL = ['InvisibleOperator', 'Number', 'Multiply', 'Add', 'Power', 'Flatten', 'Order'];
+
+// MathLive's own inline shortcuts turn "dx"/"dy"/"dt" into "\differentialD x"
+// etc. as you finish typing them — the ISO-style upright "d" for a
+// differential, e.g. in d/dx or under an integral's dx. It's a nicer render,
+// but compute-engine's LaTeX parser has no grammar rule for \differentialD
+// at all and errors out on it ("unexpected-command") rather than treating it
+// as a plain d. Swapping it back to a literal "d" before parsing — only for
+// interpretation; the field itself still displays the pretty upright d — is
+// what lets d/dx(...), \int ... dx, etc. resolve instead of hitting a
+// syntax error the moment MathLive "straightens" the input.
+function normalizeLatex(latex) {
+  return wrapLeibnizArguments(latex.replace(/\\differentialD\s*/g, 'd'));
+}
+
+// compute-engine's LaTeX parser treats "\frac{d}{dx}" as a prefix operator
+// that greedily consumes everything to its right up through the end of the
+// enclosing additive chain, instead of binding only to the single term
+// immediately after it. So both "\frac{d}{dx}\left(\sin(x)\right)+1" and
+// the parenthesis-free "\frac{d}{dx}\sin(x)+2" parse as D(sin(x)+1, x) /
+// D(sin(x)+2, x) - silently pulling the trailing "+1"/"+2" inside the
+// derivative, where it then vanishes (the derivative of a constant is 0).
+// Wrapping just the intended argument - the one atom right after the
+// "d/dx" (a function call, a bare symbol, a power, ...) - together with
+// the "\frac{d}{dx}" itself in one more explicit "\left( \right)" gives
+// the parser a boundary it does respect.
+function findMatchingBrace(latex, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < latex.length; i++) {
+    if (latex[i] === '{') depth++;
+    else if (latex[i] === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function findMatchingParen(latex, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < latex.length; i++) {
+    if (latex[i] === '(') depth++;
+    else if (latex[i] === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function findMatchingRight(latex, leftIdx) {
+  let depth = 0;
+  let i = leftIdx;
+  while (i < latex.length) {
+    if (latex.startsWith('\\left', i)) {
+      depth++;
+      i += 5;
+    } else if (latex.startsWith('\\right', i)) {
+      depth--;
+      i += 6;
+      if (depth === 0) return latex[i] === '\\' ? i + 2 : i + 1;
+    } else {
+      i++;
+    }
+  }
+  return -1;
+}
+
+function skipWs(latex, i) {
+  while (i < latex.length && /\s/.test(latex[i])) i++;
+  return i;
+}
+
+// Finds the end of the single "atom" starting at pos: an optional function
+// command (\sin, \ln, \operatorname{f}, \sqrt[n]{...}, ...) followed by its
+// argument group ("\left(\right)", "(...)", "{...}", or a single bare
+// symbol/digit), plus a trailing "^..." exponent if present. This mirrors
+// just enough of LaTeX's primary-expression grammar to find where the
+// term right after "\frac{d}{dx}" ends, without needing a full parser.
+function consumeAtom(latex, pos) {
+  let i = skipWs(latex, pos);
+  const start = i;
+  const cmdMatch = /^\\[a-zA-Z]+/.exec(latex.slice(i));
+  if (cmdMatch) {
+    i += cmdMatch[0].length;
+    if (cmdMatch[0] === '\\operatorname') {
+      i = skipWs(latex, i);
+      if (latex[i] === '{') i = findMatchingBrace(latex, i) + 1;
+    }
+    i = skipWs(latex, i);
+    if (cmdMatch[0] === '\\sqrt' && latex[i] === '[') {
+      const close = latex.indexOf(']', i);
+      if (close !== -1) i = skipWs(latex, close + 1);
+    }
+  }
+  i = skipWs(latex, i);
+  if (latex.startsWith('\\left', i)) {
+    const end = findMatchingRight(latex, i);
+    if (end !== -1) i = end;
+  } else if (latex[i] === '(') {
+    const end = findMatchingParen(latex, i);
+    if (end !== -1) i = end + 1;
+  } else if (latex[i] === '{') {
+    const end = findMatchingBrace(latex, i);
+    if (end !== -1) i = end + 1;
+  } else if (cmdMatch) {
+    // bare command with no argument group, e.g. "\pi"
+  } else if (/[a-zA-Z0-9]/.test(latex[i] || '')) {
+    i++;
+  } else {
+    return start; // nothing recognizable to consume
+  }
+  const afterExp = skipWs(latex, i);
+  if (latex[afterExp] === '^') {
+    let j = skipWs(latex, afterExp + 1);
+    if (latex[j] === '{') {
+      const end = findMatchingBrace(latex, j);
+      if (end !== -1) i = end + 1;
+    } else if (latex[j] === '\\') {
+      const m = /^\\[a-zA-Z]+/.exec(latex.slice(j));
+      i = j + (m ? m[0].length : 1);
+    } else if (j < latex.length) {
+      i = j + 1;
+    }
+  }
+  return i;
+}
+
+function wrapLeibnizArguments(latex) {
+  const marker = '\\frac{d}{d';
+  let result = '';
+  let searchFrom = 0;
+  while (true) {
+    const fracStart = latex.indexOf(marker, searchFrom);
+    if (fracStart === -1) {
+      result += latex.slice(searchFrom);
+      return result;
+    }
+    const denomCloseBrace = findMatchingBrace(latex, fracStart + 8);
+    if (denomCloseBrace === -1) {
+      result += latex.slice(searchFrom, fracStart + marker.length);
+      searchFrom = fracStart + marker.length;
+      continue;
+    }
+    const argStart = skipWs(latex, denomCloseBrace + 1);
+    const argEnd = consumeAtom(latex, denomCloseBrace + 1);
+    if (argEnd <= argStart) {
+      result += latex.slice(searchFrom, denomCloseBrace + 1);
+      searchFrom = denomCloseBrace + 1;
+      continue;
+    }
+    result += latex.slice(searchFrom, fracStart) + '\\left(' + latex.slice(fracStart, argEnd) + '\\right)';
+    searchFrom = argEnd;
+  }
+}
+
 const mf = document.getElementById('mf');
 const outputPanel = document.getElementById('output-panel');
 const outputBadges = document.getElementById('output-badges');
@@ -47,10 +213,11 @@ const outputRender = document.getElementById('output-render');
 
 let lastResponse = null;
 
+// Parsed directly with ce.parse() (not mf.getValue('math-json')) so
+// PARSE_CANONICAL above actually applies — the math-field's own math-json
+// serialization calls ce.parse() internally with no way to pass options.
 function getMathJson() {
-  let mathjson = mf.getValue('math-json');
-  if (typeof mathjson === 'string') mathjson = JSON.parse(mathjson);
-  return mathjson;
+  return ce.parse(normalizeLatex(mf.getValue('latex')), { canonical: PARSE_CANONICAL }).json;
 }
 
 // Same idea as the Plot page's constant-row detection: "a = <rhs>" (bare
@@ -188,7 +355,7 @@ async function runCompute(saveToHistory = false) {
   // ever sending it, is what turns that into a clean "Syntax error" instead.
   let parsed;
   try {
-    parsed = ce.parse(latex);
+    parsed = ce.parse(normalizeLatex(latex), { canonical: PARSE_CANONICAL });
   } catch {
     parsed = null;
   }
@@ -271,6 +438,12 @@ mf.addEventListener('keydown', (event) => {
   }
 });
 
+document.getElementById('clear-input').addEventListener('click', () => {
+  mf.value = '';
+  mf.focus();
+  runComputeIfNonEmpty(false);
+});
+
 document.getElementById('copy-input').addEventListener('click', () => {
   const settings = getSettings();
   let text;
@@ -288,7 +461,7 @@ document.getElementById('copy-output').addEventListener('click', () => {
   let text;
   if (settings.copyFormat === 'mathjson' && lastResponse.latex) {
     try {
-      text = JSON.stringify(ce.parse(lastResponse.latex).json);
+      text = JSON.stringify(ce.parse(lastResponse.latex, { canonical: PARSE_CANONICAL }).json);
     } catch {
       text = lastResponse.latex;
     }

@@ -13,7 +13,7 @@
   var STORAGE_KEY = "mathstuff2.settings";
   var DEFAULT_BG_LIGHT = "#eef0f6";
   var DEFAULT_BG_DARK = "#14151f";
-  var state = { accent: "indigo", background: null, backgroundEffect: "matrix" };
+  var state = { accent: "blue", accentSecondary: null, background: null, backgroundEffect: "matrix", panelOpacity: 100, panelBlur: 10, animationSpeed: 1, squareCorners: false };
   try {
     var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (saved && typeof saved === "object") {
@@ -34,10 +34,35 @@
     root.setAttribute("data-accent", state.accent);
   }
 
+  if (typeof state.accentSecondary === "string" && state.accentSecondary.charAt(0) === "#") {
+    root.setAttribute("data-accent-secondary", "custom");
+    root.style.setProperty("--accent-secondary-custom", state.accentSecondary);
+  } else if (state.accentSecondary) {
+    root.setAttribute("data-accent-secondary", state.accentSecondary);
+  }
+
   if (state.background) {
     root.setAttribute("data-custom-bg", "true");
     root.style.setProperty("--bg-custom", state.background);
   }
+
+  // Set before first paint for the same reason as accent/background above:
+  // without this, every page navigation (each page is its own full HTML
+  // document, not a client-side route) painted the CSS default — fully
+  // opaque, no blur — until the deferred settings.js module ran a moment
+  // later and snapped it to the saved value. That's the flash of "briefly
+  // solid, then transparent" on every page/tab switch.
+  root.style.setProperty("--panel-alpha", state.panelOpacity + "%");
+  // backdrop-filter: blur(0px) is not the same as no backdrop-filter at all —
+  // even a zero blur forces the panel onto its own GPU compositing layer,
+  // which visibly degrades text rendering under it (the "glitchy" text users
+  // see with the Panel blur slider at 0). So the filter is omitted entirely
+  // ("none") at 0 instead of being handed a 0px blur.
+  root.style.setProperty("--panel-backdrop", state.panelBlur > 0 ? "blur(" + state.panelBlur + "px)" : "none");
+  root.style.setProperty("--panel-backdrop-topbar", state.panelBlur > 0 ? "saturate(180%) blur(" + state.panelBlur + "px)" : "none");
+  root.style.setProperty("--fx-speed", state.animationSpeed);
+
+  root.setAttribute("data-corners", state.squareCorners ? "square" : "rounded");
 
   // Panels/text/borders aren't a separate light/dark choice — their tone is
   // derived from whatever background color is actually in effect (custom,
@@ -54,8 +79,10 @@
     return brightness > 0.55 ? "light" : "dark";
   }
 
-  // The pulse effect is pure CSS (driven entirely by this attribute) — set
-  // here too, not just from background-fx.js, so it doesn't flash in a
-  // moment after that deferred module script finally runs.
+  // CSS gates the canvas element itself on this attribute (hidden for
+  // "none", shown otherwise — see styles.css) — set here too, not just
+  // from background-fx.js, so the canvas doesn't flash visibly blank/empty
+  // for a moment after that deferred module script finally runs and picks
+  // an actual effect to draw.
   root.setAttribute("data-bg-fx", state.backgroundEffect || "none");
 })();

@@ -22,6 +22,14 @@ const SECTIONS = [
   },
   {
     page: 'Compute',
+    title: 'Trig & hyperbolic functions',
+    examples: [
+      { latex: '\\sin^{-1}\\left(\\frac{1}{2}\\right)', mathjson: ['Arcsin', ['Rational', 1, 2]], note: 'Also written arcsin(x). Degrees mode converts the result too.' },
+      { latex: '\\sinh(x)+\\cosh(x)', mathjson: ['Add', ['Sinh', 'x'], ['Cosh', 'x']], note: 'sinh, cosh, tanh, their reciprocals (csch, sech, coth), and inverses (sinh⁻¹, cosh⁻¹, tanh⁻¹, …) are all supported.' },
+    ],
+  },
+  {
+    page: 'Compute',
     title: 'Solving equations',
     examples: [
       { latex: 'x^2-5x+6=0', mathjson: ['Equal', ['Add', ['Power', 'x', 2], ['Multiply', -5, 'x'], 6], 0], note: 'Solves for the one variable present.' },
