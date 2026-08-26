@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="104" fill="#000000"/>
+
+  <!-- screen -->
+  <rect x="96" y="92" width="320" height="118" rx="16" fill="#150505" stroke="#ff0000" stroke-width="7"/>
+  <text x="256" y="176" font-family="Liberation Mono, DejaVu Sans Mono, monospace" font-weight="700"
+        font-size="72" fill="#ff2222" text-anchor="middle">PC</text>
+
+  <!-- keypad -->
+  <g fill="#ff0000">
+    <rect x="96"  y="248" width="94" height="66" rx="14"/>
+    <rect x="209" y="248" width="94" height="66" rx="14"/>
+    <rect x="322" y="248" width="94" height="66" rx="14"/>
+    <rect x="96"  y="332" width="94" height="66" rx="14"/>
+    <rect x="209" y="332" width="94" height="66" rx="14"/>
+    <rect x="322" y="332" width="94" height="66" rx="14"/>
+  </g>
+</svg>

@@ -1,18 +1,17 @@
 import sympy as sp
 
 from ..mathjson import to_sympy
-from ..format_result import to_display
 
 
-def try_unknown_matrix(mathjson, angle_mode="rad", decimals=None):
+def try_unknown_matrix(mathjson, angle_mode="rad"):
     """If `mathjson` is `["Equal", ..., ...]` with a bare identifier
     multiplied directly against a concrete matrix on one side, and a
     concrete matrix on the other (e.g. ["Multiply", "x", <matrix>] = <matrix>),
-    solve for that identifier as an entire unknown matrix and return the
-    result. Returns None if the shape doesn't match this pattern, so the
-    caller should fall back to the regular equation pipeline (which already
-    handles a bare symbol used as a single scalar entry *inside* a literal
-    matrix, an unrelated case).
+    solve for that identifier as an entire unknown matrix and return a
+    resolved dict (see compute._resolve) for it. Returns None if the shape
+    doesn't match this pattern, so the caller should fall back to the
+    regular equation pipeline (which already handles a bare symbol used as
+    a single scalar entry *inside* a literal matrix, an unrelated case).
     """
     if not (isinstance(mathjson, list) and len(mathjson) == 3 and mathjson[0] == "Equal"):
         return None
@@ -22,7 +21,7 @@ def try_unknown_matrix(mathjson, angle_mode="rad", decimals=None):
         match = _find_unknown_times_matrix(multiply_node)
         if match and _is_matrix_node(target_node):
             known_node, unknown_is_left = match
-            return solve(known_node, target_node, unknown_is_left, angle_mode, decimals)
+            return solve(known_node, target_node, unknown_is_left, angle_mode)
 
     return None
 
@@ -42,7 +41,7 @@ def _find_unknown_times_matrix(node):
     return None
 
 
-def solve(known_node, target_node, unknown_is_left, angle_mode="rad", decimals=None):
+def solve(known_node, target_node, unknown_is_left, angle_mode="rad"):
     """Solve for an entirely unknown matrix X in `X * known = target` (or
     `known * X = target` when `unknown_is_left` is False).
 
@@ -77,13 +76,7 @@ def solve(known_node, target_node, unknown_is_left, angle_mode="rad", decimals=N
     except sp.matrices.exceptions.NonInvertibleMatrixError:
         return _error("can't solve: the known matrix isn't invertible")
 
-    display = to_display(solution, decimals)
-    return {
-        "mode": "solve",
-        "method": "matrix_inverse",
-        "result": [str(display)],
-        "latex": sp.latex(display),
-    }
+    return {"kind": "matrix", "matrix": solution}
 
 
 def _shape_error(known, target):
@@ -95,4 +88,4 @@ def _shape_error(known, target):
 
 
 def _error(message):
-    return {"mode": "error", "result": message}
+    return {"kind": "final", "response": {"mode": "error", "result": message}}

@@ -47,7 +47,81 @@
   --radius: 14px;
   --radius-sm: 8px;
   --mono: "SFMono-Regular", ui-monospace, Consolas, Menlo, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Inter", sans-serif;
+  /* Inter is the app-wide UI font — plain, functional, "calculator" rather
+     than "LaTeX document." Self-hosted via @font-face below (same as
+     CMU Serif) rather than relying on it being installed system-wide.
+     System-UI fallbacks first in case the webfont is still loading. */
+  --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* CMU Serif (Computer Modern — the classic LaTeX text face) is used
+     sparingly, not app-wide: the "PrettyCAS" title and the Help page (see
+     #app-title / main[data-view="help"] below), where a LaTeX-document
+     feel actually fits — everywhere else stays --sans for a plainer,
+     calculator-like UI. Self-hosted via @font-face rather than relying on
+     it being installed system-wide (it usually isn't). Deliberately NOT
+     applied to MathLive's own math rendering — that uses its own bundled
+     math font (already Computer-Modern-derived, with the glyph coverage
+     and spacing metrics a plain text face like this one doesn't have), so
+     the two still look visually consistent without swapping MathLive's
+     internals. Generic serif fallback for the brief window before the
+     webfont loads, or if it somehow fails to. */
+  --serif: "CMU Serif", "Latin Modern Roman", Georgia, "Times New Roman", serif;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter-Regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter-Bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter-Italic.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter-BoldItalic.otf") format("opentype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CMU Serif";
+  src: url("./fonts/CMUSerif-Roman.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CMU Serif";
+  src: url("./fonts/CMUSerif-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CMU Serif";
+  src: url("./fonts/CMUSerif-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CMU Serif";
+  src: url("./fonts/CMUSerif-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
 }
 
 /* Accent themes: pick from the settings panel's color swatches. Full 100%
@@ -198,6 +272,14 @@ body {
   transition: color 0.15s ease;
 }
 
+/* The Help page reads as documentation/prose, not app chrome — CMU Serif
+   fits there the same way it fits the title (see header.topbar h1).
+   code/pre inside it still override to --mono where that's already set,
+   since inheritance always loses to any explicit rule on the descendant. */
+main[data-view="help"] {
+  font-family: var(--serif);
+}
+
 /* ---------- Background effects ---------- */
 
 .bg-fx-canvas {
@@ -230,6 +312,7 @@ header.topbar {
 }
 
 header.topbar h1 {
+  font-family: var(--serif);
   font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -354,6 +437,21 @@ main {
   gap: 1.25rem;
 }
 
+/* shell.js hides the three inactive <main data-view> landmarks via the
+   `hidden` attribute. Every other display rule for `main` here (including
+   `main.plot-layout` below) is an author-stylesheet rule, and CSS resolves
+   cascade origin (user-agent vs. author) before specificity — so the
+   browser's own built-in `[hidden] { display: none }` rule, despite being
+   an attribute selector, always LOSES to any of these plain `main { display:
+   ... }` author rules, no matter how much lower their specificity looks on
+   paper. (Confirmed live: Help/Misc's `<main>` kept `display: flex` with
+   `hidden` correctly set as an attribute — a real, easy-to-miss gotcha, not
+   a hypothetical.) `!important` is what it actually takes for an author
+   rule to beat the UA stylesheet outright. */
+main[hidden] {
+  display: none !important;
+}
+
 .panel {
   background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
   backdrop-filter: var(--panel-backdrop);
@@ -365,8 +463,19 @@ main {
 
 /* ---------- Math input ---------- */
 
+/* MathLive only wires up mouse-driven caret placement/selection
+   (connectedCallback in mathlive.mjs) when getComputedStyle(host).userSelect
+   isn't "none" at the moment the element is upgraded — otherwise it skips
+   attaching its pointerdown handler entirely, permanently, with no re-check
+   later. Left unset, that resolves from whatever default the host's engine
+   hands back before our stylesheet has necessarily applied (this project
+   already hit one other case of pywebview's Qt/QtWebEngine backend
+   measuring the field before layout/styles have settled — see the
+   menu-toggle comment on #mf::part below). Setting it explicitly removes
+   that race instead of relying on an engine's default resolving to
+   anything other than "none".  */
 math-field {
-  font-size: 1.5rem;
+  font-size: calc(1.5rem * var(--math-scale, 1));
   width: 100%;
   display: block;
   border: 1.5px solid var(--border-strong);
@@ -375,6 +484,7 @@ math-field {
   background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
   backdrop-filter: var(--panel-backdrop);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: text;
 }
 
 /* MathLive decides whether to show its own menu-toggle button by measuring
@@ -536,6 +646,7 @@ button.secondary:hover {
 }
 
 .badge {
+  font-family: var(--sans);
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -552,8 +663,20 @@ button.secondary:hover {
   background: color-mix(in srgb, var(--error) 18%, var(--panel-bg));
 }
 
+/* mathlive-static.css's own .ML__latex rule (the wrapper convertLatexToMarkup
+   wraps every result in) hardcodes user-select: none — reasonable for a
+   mathfield that manages its own selection highlighting, but this output is
+   plain static markup with no such mechanism, so that rule just blocks the
+   browser's native text selection with nothing to replace it. Overriding it
+   here (two classes beats their one, so this wins regardless of link order)
+   lets results be click-dragged and copied like any other text; user-select
+   inherits down to the glyph spans inside so no deeper override is needed. */
+.output-render .ML__latex {
+  user-select: text;
+}
+
 .output-render {
-  font-size: 1.45rem;
+  font-size: calc(1.45rem * var(--math-scale, 1));
   overflow-x: auto;
   padding: 0.5rem 0.25rem;
   line-height: 1.6;
@@ -1012,7 +1135,7 @@ details.history[open] summary::before { transform: rotate(90deg); }
 }
 
 .help-example-math {
-  font-size: 1.2rem;
+  font-size: calc(1.2rem * var(--math-scale, 1));
   overflow-x: auto;
 }
 
@@ -1069,10 +1192,12 @@ details.history[open] summary::before { transform: rotate(90deg); }
 
 /* ---------- Plot page ---------- */
 
-/* The plot page trades the single-column `main` layout every other page
+/* The plot view trades the single-column `main` layout every other view
    uses for a fixed-height Desmos-style split: expression list left, graph
-   right. Scoped to body.plot-page so it doesn't affect Compute's <main>. */
-.plot-page main.plot-layout {
+   right. `.plot-layout` is only ever on the one <main data-view="plot">
+   landmark, so no further scoping is needed to keep this off Compute's
+   <main>. */
+main.plot-layout {
   max-width: 1700px;
   height: calc(100vh - 4.5rem);
   padding: 1.25rem;
@@ -1270,6 +1395,32 @@ details.history[open] summary::before { transform: rotate(90deg); }
   box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text);
 }
 
+/* The 8th swatch is a real <input type="color"> (native OS picker for an
+   arbitrary custom color) rather than a fixed-hex button — stripped of the
+   browser's own square swatch chrome so it matches the round palette
+   buttons around it. */
+.expr-color-swatch.expr-color-custom {
+  -webkit-appearance: none;
+  appearance: none;
+  border: none;
+  padding: 0;
+}
+
+.expr-color-swatch.expr-color-custom::-webkit-color-swatch-wrapper {
+  padding: 0;
+  border-radius: 50%;
+}
+
+.expr-color-swatch.expr-color-custom::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.expr-color-swatch.expr-color-custom::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
 .expr-color-popover-toggle {
   width: 100%;
   border: 1px solid var(--border-strong);
@@ -1299,13 +1450,18 @@ details.history[open] summary::before { transform: rotate(90deg); }
 .expr-field {
   display: block;
   width: 100%;
-  font-size: 1.05rem;
+  font-size: calc(1.05rem * var(--math-scale, 1));
   padding: 0.5rem 0.65rem;
   border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
   backdrop-filter: var(--panel-backdrop);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  /* See the same property on the top-level math-field rule: without this,
+     mouse-driven caret placement/selection depends on the host engine's
+     default user-select resolution at upgrade time instead of an explicit
+     value. */
+  user-select: text;
 }
 
 .expr-field:focus-within {
@@ -1723,7 +1879,7 @@ details.history[open] summary::before { transform: rotate(90deg); }
 }
 
 @media (max-width: 860px) {
-  .plot-page main.plot-layout {
+  main.plot-layout {
     height: auto;
     grid-template-columns: 1fr;
   }

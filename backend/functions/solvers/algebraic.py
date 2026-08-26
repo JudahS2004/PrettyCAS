@@ -9,9 +9,16 @@ def _real_cubic_trig_form(expr, symbol):
     can't cancel that away symbolically, so it comes back as unreadable
     nested complex radicals that are technically correct but useless to look
     at. The trigonometric form of the same formula (via arccos) stays real
-    throughout for exactly this case, so it's tried first whenever the
-    equation qualifies — returns None (falls through to the regular solve)
-    for every other shape of equation.
+    throughout for exactly this case — but it's only worth reaching for when
+    the plain solve actually hit that problem (see try_algebraic below):
+    forcing it unconditionally on every 3-real-root cubic used to make a
+    cubic with simple rational roots (e.g. x^3-7x+6=0, cleanly (x-1)(x-2)
+    (x+3)) come back as an unreadable trig expression instead of the plain
+    "1, 2, -3" a regular solve already gives — strictly worse, for a case
+    that was never actually broken. Returns None whenever this doesn't
+    apply, or on the rare case where even the trig identities don't fully
+    clear the complex terms either, so the caller keeps the plain (if ugly)
+    solve result instead of a partially-real-but-still-complex swap.
     """
     try:
         poly = sp.Poly(expr.lhs - expr.rhs, symbol)
@@ -35,10 +42,6 @@ def try_algebraic(expr, symbol):
     closed-form algorithm for this equation (or finds no solutions), so the
     caller should fall back to a numerical method.
     """
-    trig_roots = _real_cubic_trig_form(expr, symbol)
-    if trig_roots is not None:
-        return trig_roots
-
     try:
         solutions = sp.solve(expr, symbol)
     except (NotImplementedError, TypeError):
@@ -52,5 +55,16 @@ def try_algebraic(expr, symbol):
 
     if not solutions:
         return None
+
+    if any(s.has(sp.I) for s in solutions):
+        # Only reached for a solve that actually came back with a complex
+        # term — the casus-irreducibilis cubic this trig form exists for,
+        # or (rarely) some other equation shape it doesn't apply to and
+        # correctly declines. A cubic with nice rational/simple-radical
+        # roots never reaches this branch at all, so it keeps sp.solve's
+        # own plain answer instead of being swapped for something uglier.
+        trig_roots = _real_cubic_trig_form(expr, symbol)
+        if trig_roots is not None:
+            return trig_roots
 
     return solutions

@@ -1,3 +1,5 @@
+import { getCapabilities } from "./api.js";
+
 const STORAGE_KEY = "mathstuff2.settings";
 
 const DEFAULTS = {
@@ -7,6 +9,8 @@ const DEFAULTS = {
   decimals: 6,
   angleMode: "rad", // "rad" | "deg"
   simplifyMode: "auto", // "auto" | "expand" | "factor"
+  enginePreference: "sympy", // "sympy" | "maxima" — which is tried first for an integral
+  autoCompute: true, // whether typing recomputes on its own (see app.js's AUTO_COMPUTE_DELAY_MS) or only Enter does
   // A preset name ("blue" etc.) or an arbitrary "#rrggbb" from the color pickers below.
   accent: "blue",
   accentSecondary: null, // null = auto-derived; a preset name ("rose" etc.); or an arbitrary "#rrggbb"
@@ -15,6 +19,7 @@ const DEFAULTS = {
   panelOpacity: 100, // 100 = solid; lower lets the background effect show through the panels
   panelBlur: 10, // px of backdrop blur behind a translucent panel; 0 = none (crisp see-through)
   animationSpeed: 1, // multiplier applied to every background effect's motion
+  mathScale: 1, // multiplier applied to every rendered math surface's font size
   showHistory: true,
   squareCorners: false, // false = the theme's rounded --radius/--radius-sm; true = sharp 0px corners on inputs/buttons/panels
 };
@@ -67,6 +72,9 @@ const PANEL_BLUR_MAX = 20; // px
 const ANIMATION_SPEED_MIN = 0.25;
 const ANIMATION_SPEED_MAX = 2;
 const ANIMATION_SPEED_STEP = 0.25;
+const MATH_SCALE_MIN = 0.5;
+const MATH_SCALE_MAX = 2;
+const MATH_SCALE_STEP = 0.05;
 
 const SETTINGS_TABS = [
   { id: "appearance", label: "Appearance" },
@@ -150,6 +158,7 @@ function applyTheme() {
   root.style.setProperty("--panel-backdrop", state.panelBlur > 0 ? `blur(${state.panelBlur}px)` : "none");
   root.style.setProperty("--panel-backdrop-topbar", state.panelBlur > 0 ? `saturate(180%) blur(${state.panelBlur}px)` : "none");
   root.style.setProperty("--fx-speed", state.animationSpeed);
+  root.style.setProperty("--math-scale", state.mathScale);
 
   root.dataset.corners = state.squareCorners ? "square" : "rounded";
 }
@@ -186,6 +195,24 @@ function applySettingsPatch(patch) {
 export function updateSetting(key, value) {
   applySettingsPatch({ [key]: value });
 }
+
+// Whether Maxima is available as an integration fallback on this machine —
+// mountSettingsPanel's sync() greys out that radio until this resolves (and
+// permanently, if it resolves to false). Starts false rather than assuming
+// available, so a mounted panel never briefly offers a choice that turns
+// out not to work.
+let maximaAvailable = false;
+getCapabilities().then((caps) => {
+  maximaAvailable = Boolean(caps.maxima_available);
+  if (!maximaAvailable && state.enginePreference === "maxima") {
+    // Was picked on a machine/build that had Maxima; this one doesn't —
+    // fall back to the setting that actually works rather than leave a
+    // saved preference the panel can no longer even let them select.
+    applySettingsPatch({ enginePreference: "sympy" });
+  } else {
+    listeners.forEach((callback) => callback(getSettings()));
+  }
+});
 
 // Renders the settings form into `container` and wires it up to state.
 // `container` should be an empty element; this owns its full contents.
@@ -265,6 +292,14 @@ export function mountSettingsPanel(container) {
         </div>
 
         <div class="color-field">
+          <span class="color-field-label">Math size</span>
+          <div class="slider-control">
+            <input type="range" name="mathScale" min="${MATH_SCALE_MIN}" max="${MATH_SCALE_MAX}" step="${MATH_SCALE_STEP}">
+            <span class="math-scale-value"></span>
+          </div>
+        </div>
+
+        <div class="color-field">
           <span class="color-field-label">Corners</span>
           <label><input type="checkbox" name="squareCorners"> Square corners (instead of rounded)</label>
         </div>
@@ -272,6 +307,11 @@ export function mountSettingsPanel(container) {
     </div>
 
     <div class="settings-tab-panel" data-tab-panel="computation">
+      <fieldset class="settings-group">
+        <legend>Auto-compute</legend>
+        <label><input type="checkbox" name="autoCompute"> Compute automatically while typing</label>
+      </fieldset>
+
       <fieldset class="settings-group">
         <legend>Angles</legend>
         <label><input type="radio" name="angleMode" value="rad"> Radians</label>
@@ -294,6 +334,12 @@ export function mountSettingsPanel(container) {
         <label><input type="radio" name="simplifyMode" value="auto"> Auto (simplify)</label>
         <label><input type="radio" name="simplifyMode" value="expand"> Expand</label>
         <label><input type="radio" name="simplifyMode" value="factor"> Factor</label>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>Integration engine</legend>
+        <label><input type="radio" name="enginePreference" value="sympy"> Sympy (default)</label>
+        <label class="settings-subitem"><input type="radio" name="enginePreference" value="maxima" id="engine-maxima-radio"> Maxima</label>
       </fieldset>
 
       <fieldset class="settings-group">
@@ -325,7 +371,11 @@ export function mountSettingsPanel(container) {
     for (const el of container.querySelectorAll("input[type=radio]")) {
       el.checked = state[el.name] === el.value;
     }
+    const maximaRadio = container.querySelector("#engine-maxima-radio");
+    maximaRadio.disabled = !maximaAvailable;
+    maximaRadio.closest("label").title = maximaAvailable ? "" : "Maxima isn't installed on this machine";
     container.querySelector("input[name=showHistory]").checked = state.showHistory;
+    container.querySelector("input[name=autoCompute]").checked = state.autoCompute;
     container.querySelector("input[name=squareCorners]").checked = state.squareCorners;
     container.querySelector("input[name=decimals]").value = state.decimals;
     container.querySelector("input[name=decimalsSlider]").value = Math.min(state.decimals, DECIMALS_SLIDER_MAX);
@@ -337,6 +387,8 @@ export function mountSettingsPanel(container) {
     container.querySelector(".panel-blur-value").textContent = `${state.panelBlur}px`;
     container.querySelector("input[name=animationSpeed]").value = state.animationSpeed;
     container.querySelector(".animation-speed-value").textContent = `${state.animationSpeed}x`;
+    container.querySelector("input[name=mathScale]").value = state.mathScale;
+    container.querySelector(".math-scale-value").textContent = `${Math.round(state.mathScale * 100)}%`;
 
     const customAccent = state.accent.startsWith("#");
     for (const el of container.querySelectorAll(".swatch[data-accent-preset]")) {
@@ -396,6 +448,8 @@ export function mountSettingsPanel(container) {
       updateSetting("panelBlur", parseInt(el.value, 10));
     } else if (el.name === "animationSpeed") {
       updateSetting("animationSpeed", parseFloat(el.value));
+    } else if (el.name === "mathScale") {
+      updateSetting("mathScale", parseFloat(el.value));
     } else if (el.name === "accentCustom") {
       updateSetting("accent", el.value);
     } else if (el.name === "accentSecondaryCustom") {

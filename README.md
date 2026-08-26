@@ -59,63 +59,16 @@ Integrating in terms of an abstract function:
 
 ## Installation
 
-Builds with PyInstaller and installs a launchable app (Start Menu / app launcher entry), user-local, no admin/sudo required. Re-run the install script any time after changing source.
+Requires [Python](https://www.python.org/downloads/) 3.10+ and [Node.js](https://nodejs.org) (for `npm`) to be installed and on your PATH — that's it, the install script handles everything else.
 
-### Quick start (any OS)
-
-Once the venv + package install steps below are done, you don't need to build/install anything to just run it:
-```bash
-cd backend
-.venv/bin/python desktop.py
-```
-(Windows: `cd backend`, then `.venv\Scripts\python desktop.py`)
-
-This opens PrettyCAS in a native window directly. The Linux/Windows steps below are only for getting a permanent Start Menu / app-launcher entry.
+Builds with PyInstaller and installs a launchable app (Start Menu / app launcher entry), user-local, no admin/sudo required. It sets up the Python virtual environment, installs the backend (`pip`) and frontend (`npm`) packages on first run — skipping any of that on later runs unless `backend/requirements.txt` or `frontend/package.json` changed — then builds and installs. Re-run it any time after changing source.
 
 ### Linux
-
-Make python virtual environment in repo
-```bash
-python3 -m venv backend/.venv
-```
-
-Install backend packages
-```bash
-backend/.venv/bin/pip install -r backend/requirements.txt
-```
-
-Install frontend packages
-```bash
-cd frontend
-npm install
-cd ..
-```
-
-Run install script
 ```bash
 ./install-linux.sh
 ```
 
 ### Windows
-
-Make python virtual environment in repo
-```powershell
-python -m venv backend\.venv
-```
-
-Install backend packages
-```powershell
-backend\.venv\Scripts\pip install -r backend\requirements.txt
-```
-
-Install frontend packages
-```powershell
-cd frontend
-npm install
-cd ..
-```
-
-Run install script
 ```powershell
 .\install-windows.ps1
 ```
@@ -124,10 +77,22 @@ If Windows blocks the script with an execution-policy error, run it once via:
 powershell -ExecutionPolicy Bypass -File install-windows.ps1
 ```
 
+### Quick start (any OS, no install)
+
+Once `install-linux.sh`/`install-windows.ps1` has been run at least once (so the venv and packages exist), you can skip building/installing and just run it directly:
+```bash
+cd backend
+.venv/bin/python desktop.py
+```
+(Windows: `cd backend`, then `.venv\Scripts\python desktop.py`)
+
+This opens PrettyCAS in a native window directly, without a Start Menu / app-launcher entry.
+
 ## Layout
 
-- `backend/app.py`  Flask routes (`/api/compute`, `/api/sample`, `/api/export`) and static frontend serving.
+- `backend/app.py`  Flask routes (`/api/compute`, `/api/sample`, `/api/export`, `/api/capabilities`) and static frontend serving.
 - `backend/desktop.py`  desktop entry point (runs the Flask server + a pywebview window).
-- `backend/functions/`  MathJSON -> SymPy conversion, compute dispatch, solvers, plot sampling/export.
-- `frontend/`  the UI: `index.html`/`app.js` (Compute), `plot.html`/`plot.js` (Plot), `help.html`/`help.js` (Help, self-tests its examples against the live backend), `misc.html`/`misc.js` (Misc, placeholder).
-- `prettycas.spec`  PyInstaller build spec. Swap `icon.svg`/`icon.png`/`icon.ico` (same filenames) to rebrand.
+- `backend/functions/`  MathJSON -> SymPy conversion, compute dispatch, solvers, plot sampling/export. `maxima_bridge.py` is an optional fallback to a system `maxima` install for integrals SymPy can't close.
+- `frontend/`  single-page app: `index.html`/`shell.js` own shared chrome and switch between views (no separate HTML pages per view). `app.js` (Compute), `plot.js` (Plot), `help.js` (Help, self-tests its examples against the live backend), Misc (placeholder, inline markup in `index.html`).
+- `prettycas.spec`  PyInstaller build spec. Swap `icons/icon.svg`/`icons/icon.png`/`icons/icon.ico` (same filenames) to rebrand.
+- `icons/`  the app icon (SVG source plus generated PNG/ICO).

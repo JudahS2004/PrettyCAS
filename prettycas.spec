@@ -6,9 +6,9 @@ ROOT = os.path.dirname(os.path.abspath(SPEC))
 BACKEND = os.path.join(ROOT, "backend")
 FRONTEND = os.path.join(ROOT, "frontend")
 # .ico on Windows (multi-resolution, what EXE() expects there), .png
-# elsewhere — swap icon.svg/icon.png/icon.ico for your own art any time,
-# same three filenames.
-ICON = os.path.join(ROOT, "icon.ico" if sys.platform == "win32" else "icon.png")
+# elsewhere — swap icons/icon.svg, icons/icon.png, icons/icon.ico for your
+# own art any time, same three filenames.
+ICON = os.path.join(ROOT, "icons", "icon.ico" if sys.platform == "win32" else "icon.png")
 
 a = Analysis(
     [os.path.join(BACKEND, "desktop.py")],

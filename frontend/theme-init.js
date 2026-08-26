@@ -1,10 +1,10 @@
-// Applies the saved accent/background before first paint, on every page.
-// Loaded as a plain blocking <script> (not type="module") so it runs
-// synchronously during head parsing — unlike a module script, which is
-// always deferred until after the document parses and would otherwise
-// paint the default look first and flip a moment later. This also covers
-// pages like plot.html that don't load the rest of the app bundle at all,
-// so nothing resets when navigating there.
+// Applies the saved accent/background before first paint. Loaded as a plain
+// blocking <script> (not type="module") so it runs synchronously during
+// head parsing — unlike a module script, which is always deferred until
+// after the document parses and would otherwise paint the default look
+// first and flip a moment later. Runs exactly once, since the whole app is
+// now a single document (see shell.js) — everything after this first paint
+// is handled live by settings.js's own applyTheme().
 //
 // This duplicates settings.js's DEFAULTS/applyTheme logic on purpose: that
 // version runs from an ES module, which can't run this early. Keep the two
@@ -13,7 +13,7 @@
   var STORAGE_KEY = "mathstuff2.settings";
   var DEFAULT_BG_LIGHT = "#eef0f6";
   var DEFAULT_BG_DARK = "#14151f";
-  var state = { accent: "blue", accentSecondary: null, background: null, backgroundEffect: "matrix", panelOpacity: 100, panelBlur: 10, animationSpeed: 1, squareCorners: false };
+  var state = { accent: "blue", accentSecondary: null, background: null, backgroundEffect: "matrix", panelOpacity: 100, panelBlur: 10, animationSpeed: 1, mathScale: 1, squareCorners: false };
   try {
     var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (saved && typeof saved === "object") {
@@ -61,6 +61,7 @@
   root.style.setProperty("--panel-backdrop", state.panelBlur > 0 ? "blur(" + state.panelBlur + "px)" : "none");
   root.style.setProperty("--panel-backdrop-topbar", state.panelBlur > 0 ? "saturate(180%) blur(" + state.panelBlur + "px)" : "none");
   root.style.setProperty("--fx-speed", state.animationSpeed);
+  root.style.setProperty("--math-scale", state.mathScale);
 
   root.setAttribute("data-corners", state.squareCorners ? "square" : "rounded");
 

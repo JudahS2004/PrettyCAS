@@ -1,11 +1,16 @@
 import './node_modules/mathlive/mathlive.min.mjs';
-import { ComputeEngine, compile } from './node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js';
+import { compile } from './node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js';
 import { computeMathJson, sampleMathJson, exportPlot } from './api.js';
-import { getSettings, onSettingsChange, mountSettingsPanel, updateSetting } from './settings.js';
+import { getSettings, onSettingsChange } from './settings.js';
+import { ce, PARSE_CANONICAL } from './compute-engine.js';
+import { getFunctions } from './workspace.js';
 
 // Desmos-style per-expression colors, assigned round-robin as rows are added
-// (and reused for the row's color-picker swatches).
-const PALETTE = ['#2d70b3', '#c74440', '#388c46', '#6042a6', '#fa7e19', '#2abcbc', '#e6a000', '#b53db3'];
+// (and reused for the row's color-picker swatches). An 8th "custom" swatch
+// (a native <input type="color">, added alongside these in the settings
+// popover markup, not part of this array) rounds the picker out to 8 without
+// being eligible for round-robin auto-assignment.
+const PALETTE = ['#2d70b3', '#c74440', '#388c46', '#6042a6', '#fa7e19', '#2abcbc', '#e6a000'];
 
 const LINE_RESOLUTION_DEFAULT = 300;
 const SURFACE_RESOLUTION_DEFAULT = 50;
@@ -35,18 +40,8 @@ const LINE_STYLES = [
 
 const DEFAULT_DOMAIN = { min: -10, max: 10, xMin: -10, xMax: 10, yMin: -10, yMax: 10 };
 
-const ce = new ComputeEngine();
-// See app.js: without this, "f(x)" parses as implicit multiplication (f * x)
-// instead of a function call, since compute-engine has no other way to know
-// "f" names a function rather than a variable.
-ce.declare({ f: 'function', g: 'function', h: 'function' });
-globalThis.MathfieldElement.computeEngine = ce;
-
-// See app.js: every canonicalization pass except "Divide", which otherwise
-// eagerly rounds a "1/<decimal>" division (e.g. 1/3.3487) to a fixed
-// 21-digit approximation before it ever reaches the backend's exact
-// arithmetic.
-const PARSE_CANONICAL = ['InvisibleOperator', 'Number', 'Multiply', 'Add', 'Power', 'Flatten', 'Order'];
+// ce and PARSE_CANONICAL come from compute-engine.js — shared with app.js so
+// both math-fields on the page point at the same engine instance.
 
 // See app.js: MathLive's "dx"/"dy"/"dt" inline shortcut expands to
 // "\differentialD x" etc., which compute-engine's LaTeX parser doesn't
@@ -197,19 +192,11 @@ function wrapLeibnizArguments(latex) {
   }
 }
 
-const exprListEl = document.getElementById('expr-list');
-const addExprBtn = document.getElementById('add-expr');
-const modeButtons = [...document.querySelectorAll('.mode-btn')];
-const plotTitleEl = document.getElementById('plot-title');
-const plotSubtitleEl = document.getElementById('plot-subtitle');
-const graphSettingsToggle = document.getElementById('graph-settings-toggle');
-const graphSettingsPanel = document.getElementById('graph-settings-panel');
-const exportToggle = document.getElementById('export-toggle');
-const exportMenu = document.getElementById('export-menu');
-const plotPanel = document.getElementById('plot-panel');
-const plotError = document.getElementById('plot-error');
-const plotDiv = document.getElementById('plot');
-const plotPlaceholder = document.getElementById('plot-placeholder');
+// Assigned in mount() below, once the Plot view's markup exists — module-
+// scoped so every function here can close over them without its own lookup.
+let exprListEl, addExprBtn, modeButtons, plotTitleEl, plotSubtitleEl,
+  graphSettingsToggle, graphSettingsPanel, exportToggle, exportMenu,
+  plotPanel, plotError, plotDiv, plotPlaceholder;
 
 let mode = '2d';
 let rowIdCounter = 0;
@@ -225,6 +212,9 @@ const settings2d = {
   xMin: -10, xMax: 10, xScale: 'linear',
   outputAuto: true, outputMin: -10, outputMax: 10, yScale: 'linear',
   resolution: LINE_RESOLUTION_DEFAULT,
+  // 1:1 pixel-to-unit scaling (Plotly's scaleanchor/scaleratio) — only
+  // meaningful for two linear axes, see computeXAxis2d.
+  equalAxes: false,
 };
 const settings3d = {
   xMin: -10, xMax: 10, yMin: -10, yMax: 10,
@@ -261,6 +251,65 @@ function linspace(min, max, count) {
 
 function formatSliderValue(value) {
   return Number(value.toFixed(4)).toString();
+}
+
+// Rounds to a fixed count of SIGNIFICANT figures (unlike toFixed's fixed
+// count of decimal PLACES, which on a value like 338844.1561 keeps all 10
+// digits — every one of them "real" as far as toFixed is concerned, even
+// though a value computed from a slider drag has nowhere near that much
+// genuine precision). Used for the axis-range displays (the zoom sliders'
+// own ±W label, the range values they write into the plain number inputs,
+// and the "viewing x ∈ [...]" subtitle) — not for the slider-constant
+// display (formatSliderValue above), whose fixed-decimals behavior is
+// unrelated and intentional.
+function roundSigFigs(value, sig = 3) {
+  if (!Number.isFinite(value) || value === 0) return value;
+  return Number(value.toPrecision(sig));
+}
+
+function formatSigFigs(value, sig = 3) {
+  return roundSigFigs(value, sig).toString();
+}
+
+// A pole the sample grid straddles but never lands on exactly (e.g. 1/x at
+// x=0: the backend returns a real, finite y on both neighboring grid points,
+// just enormous ones of opposite sign) otherwise draws as a single line
+// segment connecting +inf-ish to -inf-ish straight through the middle of the
+// graph — wrong, since the function was never actually there. Flagged as a
+// gap whenever a step's jump is far bigger than the curve's typical local
+// step AND crosses zero, which a genuine (if steep) continuous crossing
+// essentially never does at normal sampling resolution. Inserting an actual
+// extra null-y sample between the two (rather than nulling one of them out)
+// keeps both real, legitimately-sampled points on screen — only the segment
+// that would have bridged the pole is removed.
+function breakAsymptotes(xs, ys) {
+  const diffs = [];
+  for (let i = 0; i < ys.length - 1; i++) {
+    const a = ys[i], b = ys[i + 1];
+    if (typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b)) {
+      diffs.push(Math.abs(b - a));
+    }
+  }
+  if (diffs.length === 0) return { x: xs, y: ys };
+  diffs.sort((p, q) => p - q);
+  const median = diffs[Math.floor(diffs.length / 2)];
+  const threshold = Math.max(median * 25, 1e-9);
+
+  const outX = [xs[0]];
+  const outY = [ys[0]];
+  for (let i = 0; i < ys.length - 1; i++) {
+    const a = ys[i], b = ys[i + 1];
+    if (
+      typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b) &&
+      a !== 0 && b !== 0 && Math.sign(a) !== Math.sign(b) && Math.abs(b - a) > threshold
+    ) {
+      outX.push((xs[i] + xs[i + 1]) / 2);
+      outY.push(null);
+    }
+    outX.push(xs[i + 1]);
+    outY.push(ys[i + 1]);
+  }
+  return { x: outX, y: outY };
 }
 
 function evalNumeric(expr, vars) {
@@ -334,6 +383,9 @@ function createRow(initialLatex = '') {
     kind: 'empty',
     lineStyle: 'solid',
     domain: { ...DEFAULT_DOMAIN },
+    // Whether "Plotted over ..." has ever been hand-edited in this row's own
+    // settings popover — see syncTrackedDomains below.
+    domainCustomized: false,
   };
 
   mf.addEventListener('input', () => scheduleClassifyAndRedraw());
@@ -383,7 +435,11 @@ function ensureRowSettingsPopover(row) {
 
   pop.addEventListener('click', (event) => {
     event.stopPropagation();
-    const swatch = event.target.closest('.expr-color-swatch');
+    // The custom-color swatch is a native <input type="color">: clicking it
+    // just opens the OS picker (its own 'input'/'change' events below carry
+    // the actual chosen value), so it's excluded from the fixed-palette
+    // click-to-select handling here.
+    const swatch = event.target.closest('.expr-color-swatch:not(.expr-color-custom)');
     if (swatch) {
       row.color = swatch.dataset.color;
       syncRowVisual(row);
@@ -399,6 +455,30 @@ function ensureRowSettingsPopover(row) {
     }
   });
 
+  pop.addEventListener('input', (event) => {
+    const el = event.target;
+    if (el.classList.contains('expr-color-custom')) {
+      row.color = el.value;
+      syncRowVisual(row);
+      redraw();
+      return;
+    }
+    if (el.dataset.action !== 'resolution') return;
+    // Resolution is a per-mode setting, not per-row — this slider is just a
+    // more convenient place to reach the same settings2d/settings3d value
+    // the graph-settings drawer exposes, so both stay in sync live.
+    const s = mode === '2d' ? settings2d : settings3d;
+    s.resolution = parseInt(el.value, 10);
+    const labelText = mode === '2d' ? `${s.resolution} points` : `${s.resolution} × ${s.resolution} grid`;
+    const popLabel = pop.querySelector('[data-resolution-value]');
+    if (popLabel) popLabel.textContent = labelText;
+    const panelLabel = graphSettingsPanel?.querySelector('[data-resolution-value]');
+    if (panelLabel) panelLabel.textContent = labelText;
+    const panelSlider = graphSettingsPanel?.querySelector('[data-field=resolution]');
+    if (panelSlider) panelSlider.value = String(s.resolution);
+    debouncedRedraw();
+  });
+
   pop.addEventListener('change', (event) => {
     const action = event.target.dataset.action;
     if (action === 'line-style') {
@@ -411,6 +491,9 @@ function ensureRowSettingsPopover(row) {
     if (!Number.isFinite(value)) return;
     const field = action.slice('domain-'.length);
     row.domain[field] = value;
+    // A hand-edited domain is a deliberate override — from here on this row
+    // stops tracking the shared axis view (see syncTrackedDomains).
+    row.domainCustomized = true;
     redraw();
   });
 
@@ -432,13 +515,23 @@ function renderRowSettingsPopover(row) {
   const showDomain = row.kind === 'plot' && !isLine;
   const is3dSurface = row.dim === 2;
   const domainVarLabel = row.vars && row.vars[0] ? row.vars[0] : 'x';
+  const s = mode === '2d' ? settings2d : settings3d;
+  const resMin = mode === '2d' ? 20 : 10;
+  const resMax = mode === '2d' ? 800 : 150;
+  const resStep = mode === '2d' ? 10 : 5;
+  const resLabel = mode === '2d' ? `${s.resolution} points` : `${s.resolution} × ${s.resolution} grid`;
 
   pop.innerHTML = `
     <div class="expr-settings-section">
       <div class="expr-color-swatches">
         ${PALETTE.map((c) => `<button type="button" class="expr-color-swatch" data-color="${c}" style="background:${c}"></button>`).join('')}
+        <input type="color" class="expr-color-swatch expr-color-custom" value="${row.color}" title="Custom color">
       </div>
       <button type="button" class="expr-color-popover-toggle" data-action="toggle-visibility"></button>
+    </div>
+    <div class="expr-settings-section">
+      <label class="expr-settings-label">Number of points: <span data-resolution-value>${resLabel}</span></label>
+      <input type="range" data-action="resolution" min="${resMin}" max="${resMax}" step="${resStep}" value="${s.resolution}">
     </div>
     ${showLineStyle ? `
       <div class="expr-settings-section">
@@ -486,7 +579,6 @@ function closeAllRowSettingsPopovers() {
     if (row.settingsPopover) row.settingsPopover.hidden = true;
   }
 }
-document.addEventListener('click', closeAllRowSettingsPopovers);
 
 function toggleRowSettingsPopover(row) {
   if (row.kind !== 'plot') return;
@@ -942,17 +1034,20 @@ function build2dTraces(activeRows, s) {
       // Sampled from the ROW's own "plotted over" domain (set per-expression
       // in its settings popover), not the shared axis view range — a row can
       // be zoomed out past, or restricted narrower than, what's visible.
-      const params = { var: curve.vars[0], domain: row.domain, resolution: s.resolution, scale: s.xScale, constants: currentConstants };
+      const params = { var: curve.vars[0], domain: row.domain, resolution: s.resolution, scale: s.xScale, constants: currentConstants, functions: getFunctions() };
       const data = getOrFetchSample(row, `2d:${i}`, 'curve', curve.mathjson, params);
       if (!data) return; // nothing sampled yet for this curve — skip this redraw, another is on the way
 
+      // A log y-axis can't place zero/negative values — null them out so
+      // Plotly treats them as gaps instead of letting them (or their
+      // near-zero neighbors) drag the auto-range down into a mostly-dead
+      // multi-decade tail.
+      const y = s.yScale === 'log' ? data.y.map((v) => (v > 0 ? v : null)) : data.y;
+      const gapped = breakAsymptotes(data.x, y);
+
       traces.push({
-        x: data.x,
-        // A log y-axis can't place zero/negative values — null them out so
-        // Plotly treats them as gaps instead of letting them (or their
-        // near-zero neighbors) drag the auto-range down into a mostly-dead
-        // multi-decade tail.
-        y: s.yScale === 'log' ? data.y.map((y) => (y > 0 ? y : null)) : data.y,
+        x: gapped.x,
+        y: gapped.y,
         type: 'scatter',
         mode: 'lines',
         line: { color: row.color, width: 2.5, dash: row.lineStyle === 'solid' ? undefined : row.lineStyle },
@@ -991,6 +1086,7 @@ function build3dTraces(activeRows, s) {
         domainY: { min: row.domain.yMin, max: row.domain.yMax },
         resolution: n,
         constants: currentConstants,
+        functions: getFunctions(),
       };
       const data = getOrFetchSample(row, 'surface', 'surface', row.mathjsonExpr, params);
       if (!data || !data.z.some((zRow) => zRow.some((v) => v !== null))) continue;
@@ -1007,7 +1103,7 @@ function build3dTraces(activeRows, s) {
 
     rowCurves(row).forEach((curve, i) => {
       const alongX = curve.vars[0] === 'x';
-      const params = { var: curve.vars[0], domain: row.domain, resolution: n, scale: 'linear', constants: currentConstants };
+      const params = { var: curve.vars[0], domain: row.domain, resolution: n, scale: 'linear', constants: currentConstants, functions: getFunctions() };
       const data = getOrFetchSample(row, `3d:${i}`, 'curve', curve.mathjson, params);
       if (!data) return;
 
@@ -1045,14 +1141,24 @@ function updateSubtitle(activeRows) {
   // Each expression samples its own domain now (set per-row), so the
   // subtitle describes the shared axis view instead of a shared domain.
   plotSubtitleEl.textContent = mode === '2d'
-    ? `Plotting ${activeRows.length} ${noun} — viewing x ∈ [${s.xMin}, ${s.xMax}]`
-    : `Plotting ${activeRows.length} ${noun} — viewing x ∈ [${s.xMin}, ${s.xMax}], y ∈ [${s.yMin}, ${s.yMax}]`;
+    ? `Plotting ${activeRows.length} ${noun} — viewing x ∈ [${formatSigFigs(s.xMin)}, ${formatSigFigs(s.xMax)}]`
+    : `Plotting ${activeRows.length} ${noun} — viewing x ∈ [${formatSigFigs(s.xMin)}, ${formatSigFigs(s.xMax)}], y ∈ [${formatSigFigs(s.yMin)}, ${formatSigFigs(s.yMax)}]`;
 }
 
 // log10-space X range for a Plotly log axis (its `range` is always in log10
 // units regardless of the underlying data's units).
 function computeXAxis2d(s, at) {
-  if (s.xScale !== 'log' || s.xMax <= 0) return { ...at, title: 'x', range: [s.xMin, s.xMax], type: 'linear' };
+  if (s.xScale !== 'log' || s.xMax <= 0) {
+    // scaleanchor/scaleratio only make sense between two linear axes — a
+    // log axis has no fixed unit-per-pixel to match, so equalAxes is a
+    // no-op whenever either scale is log (checked here and, for y, in
+    // computeYAxis2d never setting it in the first place).
+    const equal = s.equalAxes && s.yScale !== 'log';
+    return {
+      ...at, title: 'x', range: [s.xMin, s.xMax], type: 'linear',
+      ...(equal ? { scaleanchor: 'y', scaleratio: 1 } : {}),
+    };
+  }
   const lo = logLowerBound(s.xMin, s.xMax);
   return { ...at, title: 'x', range: [Math.log10(lo), Math.log10(s.xMax)], type: 'log' };
 }
@@ -1079,11 +1185,47 @@ function computeLogAutoRange(traces) {
   return [Math.log10(clampedMin) - 0.15, Math.log10(max) + 0.15];
 }
 
+// The linear-scale sibling of computeLogAutoRange: a pole sampled
+// arbitrarily close to (but never exactly at) its asymptote produces one or
+// two enormous y values — plain Plotly autorange stretches the whole view to
+// fit them, squashing the actually-interesting part near y=0 down to a
+// sliver and (together with breakAsymptotes' gap) is what made the "hole"
+// invisible in practice: the two steep branches on either side still reached
+// almost to the top/bottom of frame regardless. Clamps to a few multiples of
+// the 95th-percentile |y| only when the data's actual spread is well beyond
+// that — several times wider than typical — since that gap is exactly what
+// marks "one single outlier spike," not a genuinely tall but ordinary curve;
+// returns null for anything else so those keep Plotly's normal tight
+// autorange fit.
+function computeLinearAutoRange(traces) {
+  const values = [];
+  for (const t of traces) {
+    for (const v of t.y) {
+      if (typeof v === 'number' && Number.isFinite(v)) values.push(v);
+    }
+  }
+  if (values.length === 0) return null;
+  const abs = values.map(Math.abs).sort((a, b) => a - b);
+  const trueMax = Math.max(...values);
+  const trueMin = Math.min(...values);
+  const p95 = abs[Math.min(abs.length - 1, Math.floor(abs.length * 0.95))];
+  const cap = Math.max(p95 * 3, 1e-9);
+  if (trueMax === trueMin || trueMax - trueMin <= cap * 2.5) return null;
+  const hi = Math.min(trueMax, cap);
+  const lo = Math.max(trueMin, -cap);
+  const pad = (hi - lo) * 0.08 || cap * 0.08;
+  return [lo - pad, hi + pad];
+}
+
 function computeYAxis2d(s, at, traces) {
   if (s.yScale !== 'log') {
-    return s.outputAuto
-      ? { ...at, title: 'y', autorange: true, type: 'linear' }
-      : { ...at, title: 'y', autorange: false, range: [s.outputMin, s.outputMax], type: 'linear' };
+    if (!s.outputAuto) {
+      return { ...at, title: 'y', autorange: false, range: [s.outputMin, s.outputMax], type: 'linear' };
+    }
+    const clamped = computeLinearAutoRange(traces);
+    return clamped
+      ? { ...at, title: 'y', autorange: false, range: clamped, type: 'linear' }
+      : { ...at, title: 'y', autorange: true, type: 'linear' };
   }
   if (!s.outputAuto) {
     const hi = s.outputMax > 0 ? s.outputMax : 1;
@@ -1098,8 +1240,59 @@ function computeYAxis2d(s, at, traces) {
 
 const PLOTLY_CONFIG = { responsive: true, displayModeBar: false, scrollZoom: true };
 
+// The SPA shell keeps this module (and its debounce timers, onSettingsChange
+// callback, and backend-fetch .then() handlers below) alive and listening
+// even while the Plot view is hidden behind Compute/Help/Misc — none of
+// those trigger sources are worth individually gating, since they all
+// eventually funnel into this one function. Gating redraw() itself here
+// covers all of them in one place: no wasted Plotly/WebGL work happens
+// while hidden, and shell.js's setActive(true) (below) flushes whatever
+// would have redrawn once the view is visible again.
+// Named viewActive rather than isActive to avoid colliding with the
+// unrelated local `isActive` inside renderRowChrome() below (per-row
+// mode-relevance, not view visibility).
+let viewActive = false;
+let redrawPending = false;
+
+// A row's "plotted over" domain is intentionally decoupled from the shared
+// axis view (see build2dTraces's comment) so it's possible to view a wider
+// window than what's actually plotted, or restrict a function to a
+// sub-domain — but that flexibility made the X/Y zoom sliders feel inert for
+// the common case of an untouched row: zooming out just revealed more of a
+// domain the row was never sampled over, leaving its curve confined to a
+// tiny sliver near the middle. A row that's never had its domain hand-edited
+// (row.domainCustomized, set in the settings popover's domain-* handler
+// above) tracks the current view instead, so the default case is that
+// dragging a zoom slider actually resamples the curve wider/narrower to
+// match, while a row someone has deliberately restricted keeps that
+// override regardless of how far the view zooms.
+function syncTrackedDomains() {
+  for (const row of rows) {
+    if (row.kind !== 'plot' || row.domainCustomized) continue;
+    if (row.dim === 2) {
+      row.domain.xMin = settings3d.xMin;
+      row.domain.xMax = settings3d.xMax;
+      row.domain.yMin = settings3d.yMin;
+      row.domain.yMax = settings3d.yMax;
+      continue;
+    }
+    const s = mode === '2d' ? settings2d : settings3d;
+    if (mode === '3d' && row.vars && row.vars[0] === 'y') {
+      row.domain.min = settings3d.yMin;
+      row.domain.max = settings3d.yMax;
+    } else {
+      row.domain.min = s.xMin;
+      row.domain.max = s.xMax;
+    }
+  }
+}
+
 function redraw() {
-  const activeRows = rows.filter((r) => rowWorksInMode(r, mode));
+  if (!viewActive) { redrawPending = true; return; }
+  redrawPending = false;
+  syncTrackedDomains();
+  const modeRows = rows.filter((r) => rowWorksInMode(r, mode));
+  const activeRows = modeRows.filter((r) => r.visible);
   updateSubtitle(activeRows);
 
   if (activeRows.length === 0) {
@@ -1110,9 +1303,11 @@ function redraw() {
     plotError.hidden = true;
     const anyPlots = rows.some((r) => r.kind === 'plot');
     plotPlaceholder.hidden = false;
-    plotPlaceholder.textContent = anyPlots
-      ? `Nothing to show in ${mode.toUpperCase()} — switch modes, or add a ${mode === '2d' ? '1' : '2'}-variable expression.`
-      : 'Add an expression on the left to get started.';
+    plotPlaceholder.textContent = modeRows.length > 0
+      ? 'Every expression here is hidden — click its dot to show it.'
+      : (anyPlots
+        ? `Nothing to show in ${mode.toUpperCase()} — switch modes, or add a ${mode === '2d' ? '1' : '2'}-variable expression.`
+        : 'Add an expression on the left to get started.');
     return;
   }
 
@@ -1184,6 +1379,20 @@ function redraw() {
     });
 }
 
+// Called by shell.js every time the user switches into or out of the Plot
+// view. Resizing on re-entry matters because Plotly measures its container
+// on every real draw call, and a display:none container while hidden means
+// whatever it last measured is stale (typically 0×0) by the time it's shown
+// again; flushing a pending redraw covers whatever tried to happen while
+// inactive (a settings change, a finished backend fetch, ...).
+export function setActive(active) {
+  viewActive = active;
+  if (active) {
+    if (hasPlotted) Plotly.Plots.resize(plotDiv);
+    if (redrawPending) redraw();
+  }
+}
+
 // ---------- Mode toggle ----------
 
 function setMode(newMode) {
@@ -1194,13 +1403,31 @@ function setMode(newMode) {
   renderRowChrome();
   redraw();
 }
-modeButtons.forEach((btn) => btn.addEventListener('click', () => setMode(btn.dataset.mode)));
 
 // ---------- Graph settings drawer (everything global/chrome-y lives here) ----------
+
+// Symmetric ±W log-scale slider for an axis: exponent range covers W from
+// 0.01 to 1,000,000 with fine control throughout, rather than a linear
+// slider that'd be all-or-nothing between "tiny" and "huge" ranges.
+const LOG_AXIS_SLIDER_MIN = -2;
+const LOG_AXIS_SLIDER_MAX = 6;
+
+function logAxisSliderRow(axis, label, half) {
+  const exponent = Math.log10(Math.max(half, 1e-9));
+  return `
+    <div class="settings-row">
+      <label>${label}: <span data-logaxis-value="${axis}">±${formatSigFigs(half)}</span></label>
+      <input type="range" data-log-axis="${axis}" min="${LOG_AXIS_SLIDER_MIN}" max="${LOG_AXIS_SLIDER_MAX}" step="0.01" value="${exponent}">
+    </div>
+  `;
+}
 
 function renderGraphSettingsPanel() {
   const s = mode === '2d' ? settings2d : settings3d;
   graphSettingsPanel.innerHTML = mode === '2d' ? `
+    <div class="settings-row">
+      <label><input type="checkbox" data-field="equalAxes" ${s.equalAxes ? 'checked' : ''}> Equalize axes (1:1)</label>
+    </div>
     <div class="settings-row">
       <label>X range</label>
       <div class="plot-range-inputs">
@@ -1208,6 +1435,7 @@ function renderGraphSettingsPanel() {
         <input type="number" data-field="xMax" value="${s.xMax}">
       </div>
     </div>
+    ${logAxisSliderRow('x', 'X zoom', Math.max(Math.abs(s.xMin), Math.abs(s.xMax)))}
     <div class="settings-row">
       <label><input type="checkbox" data-field="outputAuto" ${s.outputAuto ? 'checked' : ''}> Auto Y range</label>
       <div class="plot-range-inputs ${s.outputAuto ? 'is-disabled' : ''}" data-role="output-range">
@@ -1215,6 +1443,7 @@ function renderGraphSettingsPanel() {
         <input type="number" data-field="outputMax" value="${s.outputMax}">
       </div>
     </div>
+    ${logAxisSliderRow('y', 'Y zoom', Math.max(Math.abs(s.outputMin), Math.abs(s.outputMax)))}
     <div class="settings-row">
       <label>Resolution: <span data-resolution-value>${s.resolution} points</span></label>
       <input type="range" data-field="resolution" min="20" max="800" step="10" value="${s.resolution}">
@@ -1245,6 +1474,7 @@ function renderGraphSettingsPanel() {
         <input type="number" data-field="xMax" value="${s.xMax}">
       </div>
     </div>
+    ${logAxisSliderRow('x', 'X zoom', Math.max(Math.abs(s.xMin), Math.abs(s.xMax)))}
     <div class="settings-row">
       <label>Y range</label>
       <div class="plot-range-inputs">
@@ -1252,6 +1482,7 @@ function renderGraphSettingsPanel() {
         <input type="number" data-field="yMax" value="${s.yMax}">
       </div>
     </div>
+    ${logAxisSliderRow('y', 'Y zoom', Math.max(Math.abs(s.yMin), Math.abs(s.yMax)))}
     <div class="settings-row">
       <label><input type="checkbox" data-field="outputAuto" ${s.outputAuto ? 'checked' : ''}> Auto Z range</label>
       <div class="plot-range-inputs ${s.outputAuto ? 'is-disabled' : ''}" data-role="output-range">
@@ -1291,39 +1522,86 @@ function renderGraphSettingsPanel() {
 
 const debouncedRedraw = debounce(redraw, 120);
 
-graphSettingsPanel.addEventListener('input', (event) => {
-  const el = event.target;
-  const field = el.dataset.field;
-  if (!field) return;
+// Applies a symmetric ±half range from a log-axis slider drag directly to
+// the DOM (rather than a full renderGraphSettingsPanel() re-render, which
+// would destroy the very <input type="range"> the user has mid-drag and
+// break the gesture) — mirrors the resolution slider's own label-only patch
+// below.
+function applyLogAxisSlider(axis, rawHalf) {
+  // Rounded once here, then reused for both the stored setting and every
+  // displayed value below — rounding only the display and leaving the raw
+  // 10^exponent float (e.g. 338844.1561...) in settings2d/3d itself would
+  // still leak all that noise into the "viewing x ∈ [...]" subtitle, which
+  // reads straight from the setting rather than from any of these inputs.
+  const half = roundSigFigs(rawHalf, 3);
   const s = mode === '2d' ? settings2d : settings3d;
-
-  if (el.type === 'checkbox') {
-    s[field] = el.checked;
-    graphSettingsPanel.querySelector('[data-role=output-range]')?.classList.toggle('is-disabled', el.checked);
-  } else if (el.type === 'range') {
-    s[field] = parseInt(el.value, 10);
-    const label = graphSettingsPanel.querySelector('[data-resolution-value]');
-    if (label) label.textContent = mode === '2d' ? `${s[field]} points` : `${s[field]} × ${s[field]} grid`;
-  } else if (el.tagName === 'SELECT') {
-    s[field] = el.value;
-    if (field === 'aspectMode') renderGraphSettingsPanel(); // reveal/hide the manual-ratio row
+  if (mode === '2d' && axis === 'y') {
+    s.outputAuto = false;
+    s.outputMin = -half;
+    s.outputMax = half;
+    const autoCheckbox = graphSettingsPanel.querySelector('[data-field=outputAuto]');
+    if (autoCheckbox) autoCheckbox.checked = false;
+    graphSettingsPanel.querySelector('[data-role=output-range]')?.classList.remove('is-disabled');
+    const minEl = graphSettingsPanel.querySelector('[data-field=outputMin]');
+    const maxEl = graphSettingsPanel.querySelector('[data-field=outputMax]');
+    if (minEl) minEl.value = String(-half);
+    if (maxEl) maxEl.value = String(half);
   } else {
-    const value = parseFloat(el.value);
-    if (Number.isFinite(value)) s[field] = value;
+    s[`${axis}Min`] = -half;
+    s[`${axis}Max`] = half;
+    const minEl = graphSettingsPanel.querySelector(`[data-field=${axis}Min]`);
+    const maxEl = graphSettingsPanel.querySelector(`[data-field=${axis}Max]`);
+    if (minEl) minEl.value = String(-half);
+    if (maxEl) maxEl.value = String(half);
   }
-  debouncedRedraw();
-});
+  const label = graphSettingsPanel.querySelector(`[data-logaxis-value="${axis}"]`);
+  if (label) label.textContent = `±${half}`;
+}
 
-graphSettingsToggle.addEventListener('click', (event) => {
-  event.stopPropagation();
-  graphSettingsPanel.hidden = !graphSettingsPanel.hidden;
-  exportMenu.hidden = true;
-});
-document.addEventListener('click', (event) => {
-  if (!graphSettingsPanel.hidden && !graphSettingsPanel.contains(event.target) && event.target !== graphSettingsToggle) {
-    graphSettingsPanel.hidden = true;
-  }
-});
+function wireGraphSettingsPanel() {
+  graphSettingsPanel.addEventListener('input', (event) => {
+    const el = event.target;
+
+    if (el.dataset.logAxis) {
+      applyLogAxisSlider(el.dataset.logAxis, Math.pow(10, parseFloat(el.value)));
+      debouncedRedraw();
+      return;
+    }
+
+    const field = el.dataset.field;
+    if (!field) return;
+    const s = mode === '2d' ? settings2d : settings3d;
+
+    if (el.type === 'checkbox') {
+      s[field] = el.checked;
+      if (field === 'outputAuto') {
+        graphSettingsPanel.querySelector('[data-role=output-range]')?.classList.toggle('is-disabled', el.checked);
+      }
+    } else if (el.type === 'range') {
+      s[field] = parseInt(el.value, 10);
+      const label = graphSettingsPanel.querySelector('[data-resolution-value]');
+      if (label) label.textContent = mode === '2d' ? `${s[field]} points` : `${s[field]} × ${s[field]} grid`;
+    } else if (el.tagName === 'SELECT') {
+      s[field] = el.value;
+      if (field === 'aspectMode') renderGraphSettingsPanel(); // reveal/hide the manual-ratio row
+    } else {
+      const value = parseFloat(el.value);
+      if (Number.isFinite(value)) s[field] = value;
+    }
+    debouncedRedraw();
+  });
+
+  graphSettingsToggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    graphSettingsPanel.hidden = !graphSettingsPanel.hidden;
+    exportMenu.hidden = true;
+  });
+  document.addEventListener('click', (event) => {
+    if (!graphSettingsPanel.hidden && !graphSettingsPanel.contains(event.target) && event.target !== graphSettingsToggle) {
+      graphSettingsPanel.hidden = true;
+    }
+  });
+}
 
 // ---------- Export ----------
 
@@ -1335,7 +1613,7 @@ const RASTER_FORMATS = new Set(['png', 'jpeg']);
 // (matplotlib), not a snapshot of what Plotly already drew on screen.
 function buildExportPayload(format) {
   const s = mode === '2d' ? settings2d : settings3d;
-  const activeRows = rows.filter((r) => rowWorksInMode(r, mode));
+  const activeRows = rows.filter((r) => rowWorksInMode(r, mode) && r.visible);
   const specs = [];
 
   for (const row of activeRows) {
@@ -1371,7 +1649,7 @@ function buildExportPayload(format) {
       };
   const resolution = mode === '2d' ? s.resolution : Math.max(Math.min(s.resolution, SURFACE_RESOLUTION_CAP), 2);
 
-  return { mode, format, rows: specs, view, resolution, constants: currentConstants };
+  return { mode, format, rows: specs, view, resolution, constants: currentConstants, functions: getFunctions() };
 }
 
 function downloadBlob(blob, filename) {
@@ -1383,90 +1661,78 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-exportToggle.addEventListener('click', (event) => {
-  event.stopPropagation();
-  exportMenu.hidden = !exportMenu.hidden;
-  graphSettingsPanel.hidden = true;
-});
-document.addEventListener('click', () => { exportMenu.hidden = true; });
-exportMenu.addEventListener('click', (event) => event.stopPropagation());
-exportMenu.querySelectorAll('button[data-format]').forEach((btn) => {
-  btn.addEventListener('click', async () => {
-    exportMenu.hidden = true;
-    if (!hasPlotted) return;
-    const format = btn.dataset.format;
-
-    if (RASTER_FORMATS.has(format)) {
-      Plotly.downloadImage(plotDiv, { format, filename: `prettycas-${mode}-plot`, width: 1200, height: 900 });
-      return;
-    }
-
-    try {
-      const blob = await exportPlot(buildExportPayload(format), getSettings());
-      downloadBlob(blob, `prettycas-${mode}-plot.${format}`);
-    } catch (err) {
-      plotError.textContent = `Couldn't export this plot: ${err.message || err}`;
-      plotError.hidden = false;
-    }
+function wireExport() {
+  exportToggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    exportMenu.hidden = !exportMenu.hidden;
+    graphSettingsPanel.hidden = true;
   });
-});
+  document.addEventListener('click', () => { exportMenu.hidden = true; });
+  exportMenu.addEventListener('click', (event) => event.stopPropagation());
+  exportMenu.querySelectorAll('button[data-format]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      exportMenu.hidden = true;
+      if (!hasPlotted) return;
+      const format = btn.dataset.format;
 
-// ---------- Add expression ----------
+      if (RASTER_FORMATS.has(format)) {
+        Plotly.downloadImage(plotDiv, { format, filename: `prettycas-${mode}-plot`, width: 1200, height: 900 });
+        return;
+      }
 
-addExprBtn.addEventListener('click', () => {
-  const empty = rows.find((r) => r.kind === 'empty');
-  if (empty) empty.mf.focus();
-  else {
-    const row = createRow('');
-    row.mf.focus();
-  }
-});
-
-// ---------- App-wide settings (theme etc.) ----------
-
-const settingsBackdrop = document.getElementById('settings-backdrop');
-document.getElementById('settings-toggle').addEventListener('click', () => settingsBackdrop.classList.add('open'));
-settingsBackdrop.addEventListener('click', (event) => {
-  if (event.target === settingsBackdrop) settingsBackdrop.classList.remove('open');
-});
-mountSettingsPanel(document.getElementById('settings-body'));
-
-const miscMenuToggle = document.getElementById('misc-menu-toggle');
-const miscMenu = document.getElementById('misc-menu');
-miscMenuToggle.addEventListener('click', (event) => {
-  event.stopPropagation();
-  miscMenu.hidden = !miscMenu.hidden;
-});
-document.addEventListener('click', (event) => {
-  if (!miscMenu.hidden && !miscMenu.contains(event.target) && event.target !== miscMenuToggle) {
-    miscMenu.hidden = true;
-  }
-});
-
-// Clicking the title toggles debug mode (used on the Compute page); kept in
-// sync here too so the toggle behaves the same wherever it's clicked.
-const appTitle = document.getElementById('app-title');
-appTitle.addEventListener('click', () => {
-  updateSetting('displayMode', getSettings().displayMode === 'debug' ? 'user' : 'debug');
-});
-function syncAppTitle() {
-  appTitle.classList.toggle('is-debug', getSettings().displayMode === 'debug');
+      try {
+        const blob = await exportPlot(buildExportPayload(format), getSettings());
+        downloadBlob(blob, `prettycas-${mode}-plot.${format}`);
+      } catch (err) {
+        plotError.textContent = `Couldn't export this plot: ${err.message || err}`;
+        plotError.hidden = false;
+      }
+    });
+  });
 }
-syncAppTitle();
-
-onSettingsChange(() => {
-  syncAppTitle();
-  if (hasPlotted) redraw();
-});
-const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-darkMediaQuery.addEventListener('change', () => {
-  if (!getSettings().background && hasPlotted) redraw();
-});
 
 // ---------- Bootstrap ----------
 
-customElements.whenDefined('math-field').then(() => {
-  createRow('');
-  renderGraphSettingsPanel();
-  classifyAndRedraw();
-});
+export function mount() {
+  exprListEl = document.getElementById('expr-list');
+  addExprBtn = document.getElementById('add-expr');
+  modeButtons = [...document.querySelectorAll('.mode-btn')];
+  plotTitleEl = document.getElementById('plot-title');
+  plotSubtitleEl = document.getElementById('plot-subtitle');
+  graphSettingsToggle = document.getElementById('graph-settings-toggle');
+  graphSettingsPanel = document.getElementById('graph-settings-panel');
+  exportToggle = document.getElementById('export-toggle');
+  exportMenu = document.getElementById('export-menu');
+  plotPanel = document.getElementById('plot-panel');
+  plotError = document.getElementById('plot-error');
+  plotDiv = document.getElementById('plot');
+  plotPlaceholder = document.getElementById('plot-placeholder');
+
+  document.addEventListener('click', closeAllRowSettingsPopovers);
+  modeButtons.forEach((btn) => btn.addEventListener('click', () => setMode(btn.dataset.mode)));
+  wireGraphSettingsPanel();
+  wireExport();
+
+  addExprBtn.addEventListener('click', () => {
+    const empty = rows.find((r) => r.kind === 'empty');
+    if (empty) empty.mf.focus();
+    else {
+      const row = createRow('');
+      row.mf.focus();
+    }
+  });
+
+  onSettingsChange(() => {
+    if (hasPlotted) redraw();
+  });
+  const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  darkMediaQuery.addEventListener('change', () => {
+    if (!getSettings().background && hasPlotted) redraw();
+  });
+
+  customElements.whenDefined('math-field').then(() => {
+    createRow('');
+    renderGraphSettingsPanel();
+    classifyAndRedraw();
+  });
+}

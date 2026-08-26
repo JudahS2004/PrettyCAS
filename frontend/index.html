@@ -13,20 +13,20 @@
   <header class="topbar">
     <h1 id="app-title" title="Click to toggle debug mode">PrettyCAS</h1>
     <nav class="pages">
-      <a href="./index.html" aria-current="page">Compute</a>
-      <a href="./plot.html">Plot</a>
-      <a href="./help.html">Help</a>
+      <a href="#" data-view="compute" aria-current="page">Compute</a>
+      <a href="#" data-view="plot">Plot</a>
+      <a href="#" data-view="help">Help</a>
     </nav>
     <div class="menu-wrap">
       <button id="misc-menu-toggle" class="icon-button" title="More" aria-label="More">&#9776;</button>
       <div id="misc-menu" class="misc-menu" hidden>
-        <a href="./misc.html">Misc</a>
+        <a href="#" data-view="misc">Misc</a>
       </div>
     </div>
     <button id="settings-toggle" class="icon-button" title="Settings" aria-label="Settings">&#9881;</button>
   </header>
 
-  <main>
+  <main data-view="compute">
     <div class="panel">
       <math-field id="mf" style="display: block; width: 100%;"></math-field>
       <div class="row quick-toggles">
@@ -66,6 +66,83 @@
     </details>
   </main>
 
+  <main data-view="plot" class="plot-layout" hidden>
+    <aside class="expr-panel">
+      <div class="expr-panel-header">
+        <h2>Expressions</h2>
+        <p class="expr-panel-subtitle">Type a function, or <code>name = value</code> for a slider constant.</p>
+      </div>
+      <div class="expr-list" id="expr-list"></div>
+      <button type="button" id="add-expr" class="expr-add">+ Add expression</button>
+    </aside>
+
+    <section class="plot-stage">
+      <div id="plot-panel" class="plot-panel" data-mode="idle">
+        <div class="plot-toolbar">
+          <div class="mode-toggle" role="group" aria-label="Plot dimensions">
+            <button type="button" class="mode-btn is-active" data-mode="2d">2D</button>
+            <button type="button" class="mode-btn" data-mode="3d">3D</button>
+          </div>
+
+          <div class="plot-toolbar-titles">
+            <span class="plot-title" id="plot-title">2D Graph</span>
+            <span class="plot-subtitle" id="plot-subtitle">Add an expression to get started</span>
+          </div>
+
+          <div class="plot-toolbar-actions">
+            <div class="graph-settings-wrap">
+              <button type="button" id="graph-settings-toggle" class="icon-button" title="Graph settings" aria-label="Graph settings">&#9881;</button>
+              <div class="graph-settings-panel" id="graph-settings-panel" hidden></div>
+            </div>
+            <div class="export-menu-wrap">
+              <button type="button" id="export-toggle" class="secondary" title="Export plot">Export &#9662;</button>
+              <div class="export-menu" id="export-menu" hidden>
+                <div class="export-menu-label">Image</div>
+                <button type="button" data-format="png">Save as PNG</button>
+                <button type="button" data-format="jpeg">Save as JPEG</button>
+                <div class="export-menu-divider"></div>
+                <div class="export-menu-label">Vector</div>
+                <button type="button" data-format="svg">Save as SVG</button>
+                <button type="button" data-format="pdf">Save as PDF</button>
+                <button type="button" data-format="eps">Save as EPS</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="plot-canvas-area">
+          <div id="plot" class="plot-canvas" hidden></div>
+          <p id="plot-placeholder" class="empty-note">Add an expression on the left to get started.</p>
+          <div id="plot-error" class="plot-error" hidden></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <main data-view="help" hidden>
+    <div class="panel">
+      <h2>What can I type?</h2>
+      <p>Type real math notation with a keyboard (<code>x^2</code>, <code>sqrt(16)</code>, <code>x_1</code>); the field turns it into proper notation as you type. Or use the keyboard icon for a symbol palette.</p>
+      <p>Numbers has a third option, <strong>Engineering</strong>: same decimal evaluation, but the exponent is always a multiple of 3 (<code>12.3e6</code>, not <code>1.23e7</code>).</p>
+      <p>The Compute page keeps a <strong>Workspace</strong> below the output. Type <code>r = 5</code> and <code>r</code> is remembered for later inputs (<code>r + 2</code> evaluates to <code>7</code>) until you clear it or reload. Type <code>f(x) = x^2 + 1</code> to define a function the same way; later inputs can call it (<code>f(3)</code>), differentiate it, or plot it. Only <code>f</code>, <code>g</code>, and <code>h</code> can be defined as functions.</p>
+    </div>
+
+    <div id="help-sections"></div>
+  </main>
+
+  <main data-view="misc" hidden>
+    <div class="panel misc-coming-soon">
+      <h2>Misc</h2>
+      <p class="empty-note">Coming soon. Tools that don't fit neatly into a single equation field.</p>
+      <ul class="misc-feature-list">
+        <li>Eigenvalues &amp; eigenvectors</li>
+        <li>Cross-correlation</li>
+        <li>Convolution</li>
+        <li>Moving averages</li>
+      </ul>
+    </div>
+  </main>
+
   <div id="settings-backdrop" class="settings-backdrop">
     <aside class="settings-panel">
       <h2>Settings</h2>
@@ -74,6 +151,6 @@
   </div>
 
   <script type="module" async src="./background-fx.js"></script>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./shell.js"></script>
 </body>
 </html>

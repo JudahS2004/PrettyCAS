@@ -1,7 +1,7 @@
 import './node_modules/mathlive/mathlive.min.mjs';
 import { convertLatexToMarkup } from './node_modules/mathlive/mathlive.min.mjs';
 import { computeMathJson } from './api.js';
-import { getSettings, onSettingsChange, mountSettingsPanel, updateSetting } from './settings.js';
+import { getSettings } from './settings.js';
 
 // Every example here has actually been run through the real parser and
 // backend — not guessed at (each carries its own verified MathJSON rather
@@ -190,35 +190,6 @@ async function computeExample(ex, settings) {
   }
 }
 
-customElements.whenDefined('math-field').then(renderSections);
-
-// ---------- Shared page chrome (settings drawer, hamburger menu, title debug-toggle) ----------
-
-const settingsBackdrop = document.getElementById('settings-backdrop');
-document.getElementById('settings-toggle').addEventListener('click', () => settingsBackdrop.classList.add('open'));
-settingsBackdrop.addEventListener('click', (event) => {
-  if (event.target === settingsBackdrop) settingsBackdrop.classList.remove('open');
-});
-mountSettingsPanel(document.getElementById('settings-body'));
-
-const miscMenuToggle = document.getElementById('misc-menu-toggle');
-const miscMenu = document.getElementById('misc-menu');
-miscMenuToggle.addEventListener('click', (event) => {
-  event.stopPropagation();
-  miscMenu.hidden = !miscMenu.hidden;
-});
-document.addEventListener('click', (event) => {
-  if (!miscMenu.hidden && !miscMenu.contains(event.target) && event.target !== miscMenuToggle) {
-    miscMenu.hidden = true;
-  }
-});
-
-const appTitle = document.getElementById('app-title');
-appTitle.addEventListener('click', () => {
-  updateSetting('displayMode', getSettings().displayMode === 'debug' ? 'user' : 'debug');
-});
-function syncAppTitle() {
-  appTitle.classList.toggle('is-debug', getSettings().displayMode === 'debug');
+export function mount() {
+  customElements.whenDefined('math-field').then(renderSections);
 }
-syncAppTitle();
-onSettingsChange(syncAppTitle);

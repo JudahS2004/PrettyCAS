@@ -44,7 +44,7 @@ def _grid_from_z(z):
     return np.array([[np.nan if v is None else v for v in row] for row in z], dtype=float)
 
 
-def _render_2d(rows, view, resolution, constants, angle_mode):
+def _render_2d(rows, view, resolution, constants, functions, angle_mode):
     fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
     fig.patch.set_alpha(0)
     ax.patch.set_alpha(0)
@@ -61,7 +61,7 @@ def _render_2d(rows, view, resolution, constants, angle_mode):
             continue
         data = sample_curve(
             spec["mathjson"], spec["var"], spec["domain"], resolution,
-            angle_mode=angle_mode, constants=constants, scale=view.get("xScale", "linear"),
+            angle_mode=angle_mode, constants=constants, functions=functions, scale=view.get("xScale", "linear"),
         )
         y = [np.nan if v is None else v for v in data["y"]]
         ax.plot(
@@ -90,21 +90,21 @@ def _render_2d(rows, view, resolution, constants, angle_mode):
     return fig
 
 
-def _surface_grid(spec, resolution, constants, angle_mode, view):
+def _surface_grid(spec, resolution, constants, functions, angle_mode, view):
     """Returns (X, Y, Z) numpy grids for one 3D row — either a genuine
     2-variable surface, or a 1-variable curve extruded across the axis it
     doesn't depend on (mirrors the client's own build3dTraces tiling)."""
     if spec["kind"] == "surface":
         data = sample_surface(
             spec["mathjson"], spec["vars"], spec["domainX"], spec["domainY"],
-            resolution, angle_mode=angle_mode, constants=constants,
+            resolution, angle_mode=angle_mode, constants=constants, functions=functions,
         )
         X, Y = np.meshgrid(data["x"], data["y"])
         return X, Y, _grid_from_z(data["z"])
 
     data = sample_curve(
         spec["mathjson"], spec["var"], spec["domain"], resolution,
-        angle_mode=angle_mode, constants=constants,
+        angle_mode=angle_mode, constants=constants, functions=functions,
     )
     y = np.array([np.nan if v is None else v for v in data["y"]])
     own = np.array(data["x"])
@@ -122,7 +122,7 @@ def _surface_grid(spec, resolution, constants, angle_mode, view):
     return X, Y, Z
 
 
-def _render_3d(rows, view, resolution, constants, angle_mode):
+def _render_3d(rows, view, resolution, constants, functions, angle_mode):
     fig = plt.figure(figsize=(8, 6), dpi=150)
     fig.patch.set_alpha(0)
     ax = fig.add_subplot(projection="3d")
@@ -132,7 +132,7 @@ def _render_3d(rows, view, resolution, constants, angle_mode):
     # overlapping ones are lightened so they don't hide each other.
     opacity = 0.78 if len(rows) > 1 else 1.0
     for spec in rows:
-        X, Y, Z = _surface_grid(spec, resolution, constants, angle_mode, view)
+        X, Y, Z = _surface_grid(spec, resolution, constants, functions, angle_mode, view)
         if not np.isfinite(Z).any():
             continue
         ax.plot_surface(X, Y, Z, color=spec["color"], alpha=opacity, linewidth=0, antialiased=True)
@@ -175,12 +175,13 @@ def render_plot(payload, fmt):
     mode = payload.get("mode", "2d")
     resolution = int(payload.get("resolution") or (50 if mode == "3d" else 300))
     constants = payload.get("constants") or {}
+    functions = payload.get("functions") or {}
     angle_mode = "deg" if payload.get("angle_mode") == "deg" else "rad"
     rows = payload.get("rows") or []
     view = payload.get("view") or {}
 
-    fig = _render_2d(rows, view, resolution, constants, angle_mode) if mode == "2d" \
-        else _render_3d(rows, view, resolution, constants, angle_mode)
+    fig = _render_2d(rows, view, resolution, constants, functions, angle_mode) if mode == "2d" \
+        else _render_3d(rows, view, resolution, constants, functions, angle_mode)
 
     buf = io.BytesIO()
     try:

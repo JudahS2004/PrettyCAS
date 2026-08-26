@@ -1,14 +1,61 @@
 import operator
+import threading
 from functools import reduce
 
 import mpmath
 import sympy as sp
 from sympy.integrals.manualintegrate import manualintegrate
 
+from . import maxima_bridge
+
 CONSTS = {
     "Pi": sp.pi, "ExponentialE": sp.E, "ImaginaryUnit": sp.I, "Nothing": None,
     "PositiveInfinity": sp.oo, "NegativeInfinity": -sp.oo,
 }
+
+# sympy has no timeout argument anywhere in integrate/simplify/solve/dsolve —
+# checked the actual source, not just the docs (grepped the whole package;
+# the only "timeout" in it is in sympy's own internal test runner). This is
+# the real mechanism instead: run the attempt on a worker thread and just
+# stop *waiting* on it past INTEGRATION_TIMEOUT, rather than trying to make
+# sympy itself faster or interruptible. Python can't forcibly kill a thread,
+# so an abandoned attempt keeps running to completion in the background —
+# its result is simply discarded — but that no longer blocks this request's
+# response, and (now that the Flask server runs threaded — see app.py)
+# doesn't block any other request either.
+#
+# A plain daemon thread per call, not concurrent.futures.ThreadPoolExecutor:
+# confirmed live that ThreadPoolExecutor's worker threads are non-daemon by
+# design, and it registers a process-wide atexit hook that joins every
+# submitted task (abandoned ones included) before letting the interpreter
+# exit — a one-off script here visibly hung well past its own printed
+# result, waiting on exactly that. In the desktop app that would mean the
+# window not actually closing for however long an abandoned computation
+# takes. daemon=True instead gets killed outright at process exit, no
+# waiting — the correct behavior for work we've already decided to give up
+# on. A true hard-kill mid-computation still needs a subprocess, which is
+# more than this is worth: the cost of an abandoned thread is a spare CPU
+# core busy for a while, not a hung app.
+INTEGRATION_TIMEOUT = 2  # seconds
+
+
+def _run_with_timeout(fn, *args, on_timeout, timeout=INTEGRATION_TIMEOUT):
+    box = {}
+
+    def worker():
+        try:
+            box["value"] = fn(*args)
+        except Exception as e:
+            box["error"] = e
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        return on_timeout
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
 
 
 def _raise(message):
@@ -28,26 +75,54 @@ def _apply(target, arg):
     return sp.Function(str(target))(arg)
 
 
-def _indefinite_integral(body, var):
+def _sympy_indefinite_attempt(body, var):
     # sp.integrate's general (Risch-based) algorithm fully expands the
     # integrand's antiderivative, e.g. (x-1)**7/7 comes back as a 7-term
     # polynomial. manualintegrate uses human-style pattern rules instead
     # (substitution, by-parts, table lookups) and keeps that kind of result
     # in its natural compact form, so it's tried first; it's less complete
     # than the general algorithm, so anything it can't close (still contains
-    # an unevaluated Integral) falls back to the default. Either way, an
-    # indefinite integral is a family of antiderivatives, so "+ C" is added
-    # back on to be accurate (sympy's integrate omits it).
+    # an unevaluated Integral) falls back to the default. Returns None (not
+    # an unevaluated Integral) on total failure, so it composes directly
+    # with _indefinite_integral's engine-ordering loop below.
     try:
-        result = manualintegrate(body, var)
+        result = _run_with_timeout(manualintegrate, body, var, on_timeout=None)
     except Exception:
         result = None
     if result is None or result.has(sp.Integral):
-        result = sp.integrate(body, var)
-    return result + sp.Symbol("C")
+        result = _run_with_timeout(sp.integrate, body, var, on_timeout=None)
+    return None if (result is None or result.has(sp.Integral)) else result
 
 
-def _integrate(target, *rest):
+def _indefinite_integral(body, var, engine_preference="sympy"):
+    # Two independent attempts at a closed-form antiderivative — sympy's own
+    # (manualintegrate, then the general Risch-based integrate) and, if
+    # Maxima is installed, its integrate() — tried in whichever order the
+    # caller's engine_preference asks for, falling back to the other if the
+    # first finds nothing. A stress test comparing the two head-to-head (see
+    # /cas-engine-comparison.md at the repo root) found them to have
+    # genuinely different, non-overlapping blind spots — sympy alone
+    # structurally can't reach the polylogarithm-heavy family that motivated
+    # adding Maxima as a fallback at all — so trying both, rather than
+    # picking one permanently, is what actually closes more integrals.
+    # maxima_bridge.integrate_indefinite already returns None uniformly for
+    # "not installed" / "timed out" / "genuinely can't do this", so there's
+    # no special-casing needed here for the not-installed case — the loop
+    # just moves on to the other attempt, exactly as if Maxima had simply
+    # failed to find an answer.
+    attempts = (
+        [_sympy_indefinite_attempt, maxima_bridge.integrate_indefinite]
+        if engine_preference != "maxima" else
+        [maxima_bridge.integrate_indefinite, _sympy_indefinite_attempt]
+    )
+    for attempt in attempts:
+        result = attempt(body, var)
+        if result is not None:
+            return result + sp.Symbol("C")
+    return sp.Integral(body, var) + sp.Symbol("C")
+
+
+def _integrate(target, *rest, engine_preference="sympy"):
     body, _params = target if isinstance(target, tuple) else (target, ())
     # A math-field \int gives rest = (("Limits" tuple: var, lower, upper),).
     # A bare variable (indefinite, written directly) is also accepted so
@@ -55,11 +130,52 @@ def _integrate(target, *rest):
     if len(rest) == 1 and isinstance(rest[0], tuple):
         var, lower, upper = rest[0]
         if lower is None or upper is None:
-            return _indefinite_integral(body, var)
-        return sp.integrate(body, (var, lower, upper))
+            return _indefinite_integral(body, var, engine_preference)
+        # Capped at INTEGRATION_TIMEOUT rather than letting sympy grind for
+        # as long as it takes to give up on its own — a hard case can take
+        # much longer than that to conclude "no closed form" by itself, and
+        # neither fallback below needs sympy to have actually finished
+        # trying in order to kick in.
+        result = _run_with_timeout(
+            sp.integrate, body, (var, lower, upper),
+            on_timeout=sp.Integral(body, (var, lower, upper)),
+        )
+        if result.has(sp.Integral):
+            # Tried unconditionally (not engine_preference-ordered like the
+            # indefinite case above) — sympy's definite integrate() is tried
+            # first regardless, and Maxima's own definite-integral routine
+            # can reach an exact closed form here even for cases its own
+            # antiderivative search wouldn't (confirmed live:
+            # zeta(3)/4 - 1/4 for the integral that motivated this whole
+            # bridge, bounded 0 to 1 — the exact answer, not just a decimal
+            # approximation of it). Only falls through to numeric quadrature
+            # if Maxima can't close it either.
+            exact = maxima_bridge.integrate_definite(body, var, lower, upper)
+            if exact is not None:
+                return exact
+            # A definite integral, unlike an indefinite one, always has a
+            # single real number to converge on even when neither symbolic
+            # route can close it — so a numeric fallback is meaningful here
+            # specifically. See _numeric_definite_integral for why this
+            # doesn't apply to the indefinite case above.
+            numeric = _numeric_definite_integral(body, var, lower, upper)
+            if numeric is not None:
+                return numeric
+        return result
     if len(rest) == 1:
-        return _indefinite_integral(body, rest[0])
+        return _indefinite_integral(body, rest[0], engine_preference)
     return sp.integrate(body, *rest)
+
+
+def _mp_bound(b):
+    """sp.oo/-sp.oo -> mpmath's own infinities; anything else (a plain
+    number) passes through as-is. Shared by every mpmath fallback below that
+    takes a lower/upper pair from a Limits tuple."""
+    if b == sp.oo:
+        return mpmath.inf
+    if b == -sp.oo:
+        return -mpmath.inf
+    return b
 
 
 def _numeric_series(kind, body, var, lower, upper):
@@ -72,10 +188,32 @@ def _numeric_series(kind, body, var, lower, upper):
     if body.free_symbols - {var}:
         return None
     f = sp.lambdify(var, body, modules=["mpmath"])
-    a = mpmath.inf if lower == sp.oo else (-mpmath.inf if lower == -sp.oo else lower)
-    b = mpmath.inf if upper == sp.oo else (-mpmath.inf if upper == -sp.oo else upper)
+    a, b = _mp_bound(lower), _mp_bound(upper)
     try:
         value = mpmath.nsum(f, [a, b]) if kind == "sum" else mpmath.nprod(f, [a, b])
+    except Exception:
+        return None
+    if not mpmath.isfinite(value):
+        return None
+    return sp.Float(float(value))
+
+
+def _numeric_definite_integral(body, var, lower, upper):
+    # Mirrors _numeric_series above, but for a definite integral sympy's own
+    # integrate() couldn't close symbolically (e.g. one whose antiderivative
+    # needs polylogarithms, which sympy's Risch-based integrator doesn't
+    # reach) — mpmath.quad only needs the integrand to be numerically
+    # well-behaved on [lower, upper], not integrable in closed form, so it
+    # succeeds in plenty of cases the symbolic route can't. Unlike an
+    # indefinite integral (a family of functions, no single "answer" to fall
+    # back to), a definite integral always has one real number to converge
+    # on, which is what makes a numeric fallback meaningful here specifically.
+    if body.free_symbols - {var}:
+        return None
+    f = sp.lambdify(var, body, modules=["mpmath"])
+    a, b = _mp_bound(lower), _mp_bound(upper)
+    try:
+        value = mpmath.quad(f, [a, b])
     except Exception:
         return None
     if not mpmath.isfinite(value):
@@ -244,7 +382,7 @@ _INVERSE_ANGLE_OPS = {"Arcsin", "Arccos", "Arctan", "Arccsc", "Arcsec", "Arccot"
 _BOUNDED_OPS = {"Integrate", "Sum", "Product"}
 
 
-def to_sympy(node, angle_mode="rad"):
+def to_sympy(node, angle_mode="rad", engine_preference="sympy"):
     if isinstance(node, bool):
         return sp.sympify(node)
     if isinstance(node, int):
@@ -280,11 +418,17 @@ def to_sympy(node, angle_mode="rad"):
             raise ValueError("couldn't understand part of this input")
         if op in _BOUNDED_OPS and args and isinstance(args[-1], list) and args[-1][:1] == ["Tuple"]:
             args = [*args[:-1], ["Limits", *args[-1][1:]]]
-        converted = [to_sympy(a, angle_mode) for a in args]
+        converted = [to_sympy(a, angle_mode, engine_preference) for a in args]
         if op in _ANGLE_OPS and angle_mode == "deg":
             converted[0] = converted[0] * sp.pi / 180
         if op in OPS:
-            result = OPS[op](*converted)
+            # Integrate is the one op that needs engine_preference — passed
+            # as a keyword here rather than added to every OPS entry's
+            # calling convention, since nothing else reads it.
+            result = (
+                _integrate(*converted, engine_preference=engine_preference)
+                if op == "Integrate" else OPS[op](*converted)
+            )
             if op in _INVERSE_ANGLE_OPS and angle_mode == "deg":
                 result = result * 180 / sp.pi
             return result
@@ -294,3 +438,83 @@ def to_sympy(node, angle_mode="rad"):
         # Integral, etc.) instead of erroring or misparsing as multiplication.
         return sp.Function(op)(*converted)
     raise ValueError(f"bad node: {node}")
+
+
+def _ode_unknown_names(expr):
+    # Names a Derivative in an *equation* (never a bare expression — see
+    # below) is actually differentiating an AppliedUndef with respect to —
+    # i.e. names plausibly meant as *the* unknown function of an ODE/PDE
+    # (f''(x)+2f(x)=3x solved for f), not a call to some earlier, unrelated
+    # "f(x) = ..." workspace definition. f/g/h are both the only letters
+    # compute-engine parses as function calls at all (see
+    # compute-engine.js's ce.declare) and the conventional ODE-unknown
+    # letters, so this collision is a real one, not theoretical.
+    #
+    # Restricted to sp.Equality items specifically (matching exactly what
+    # _resolve_equation/_resolve_system treat as an ODE: an equation with a
+    # Derivative atom) rather than any expression with one — a bare "d/dx
+    # f(x)" with no Equal around it is never dispatched to the ODE solver,
+    # it's just evaluated, so it should still get f's stored body
+    # substituted in (and then differentiated) rather than being left
+    # unevaluated on the assumption it's an ODE's unknown.
+    exprs = expr if isinstance(expr, list) else [expr]
+    names = set()
+    for e in exprs:
+        if not isinstance(e, sp.Equality):
+            continue
+        for d in e.atoms(sp.Derivative):
+            f = d.expr
+            if isinstance(f, sp.core.function.AppliedUndef):
+                names.add(f.func.__name__)
+    return names
+
+
+def substitute_functions(expr, functions, angle_mode="rad"):
+    """Replaces calls to user-defined workspace functions (an earlier
+    "f(x) = x^2+1" input, see frontend/workspace.js) with their bodies,
+    binding each call's actual arguments to the function's declared
+    parameters. `functions` is {name: {"params": [str, ...], "body":
+    mathjson}}. Skips any name that's actually the unknown function of an
+    ODE/PDE in this same expression (see `_ode_unknown_names`) rather than
+    a genuine call to the stored definition.
+
+    sympy's `.replace(Function('f'), Lambda((x,), body))` does the
+    argument-binding substitution directly, including inside an
+    unevaluated Derivative (chain rule) or Integral — no manual walk of
+    the expression tree needed.
+    """
+    if not functions:
+        return expr
+    skip = _ode_unknown_names(expr)
+    subs = {}
+    for name, spec in functions.items():
+        if name in skip:
+            continue
+        try:
+            params = [sp.Symbol(p) for p in spec["params"]]
+            body = to_sympy(spec["body"], angle_mode)
+            subs[sp.Function(name)] = sp.Lambda(tuple(params), body)
+        except Exception:
+            continue  # a malformed definition just doesn't get substituted
+    if not subs:
+        return expr
+
+    def apply_subs(item):
+        if not hasattr(item, "replace"):
+            return item
+        # Looped (rather than one pass) so a function whose stored body
+        # calls another workspace function (g(x) := f(x) + 1) resolves all
+        # the way down instead of leaving an inner call unexpanded — capped
+        # at len(subs) passes (the longest possible non-cyclic call chain)
+        # and stopped early once a pass makes no further change.
+        for _ in range(len(subs)):
+            before = item
+            for func, lam in subs.items():
+                item = item.replace(func, lam)
+            if item == before:
+                break
+        return item
+
+    if isinstance(expr, list):
+        return [apply_subs(item) for item in expr]
+    return apply_subs(expr)

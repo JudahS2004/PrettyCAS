@@ -26,8 +26,6 @@ import threading
 import webview
 from werkzeug.serving import make_server
 
-from app import app
-
 HOST = "127.0.0.1"
 PORT = 5000
 
@@ -35,16 +33,39 @@ PORT = 5000
 class ServerThread(threading.Thread):
     """Runs the Flask app in a background thread via werkzeug's own server
     (not app.run()), so it can be cleanly shut down when the window closes
-    instead of leaving an orphaned process behind."""
+    instead of leaving an orphaned process behind.
+
+    Importing the app (which pulls in sympy, numpy, ... — measured at
+    roughly 0.8s) and binding the server both happen in run(), on this
+    thread, rather than in __init__ on the caller's thread — so main()
+    below can kick this off and move straight on to setting up the Qt/
+    WebEngine window, instead of waiting for this import to finish first.
+    That window is normally the single largest chunk of startup time (a full
+    embedded Chromium instance), so overlapping the two cuts wall-clock
+    startup roughly to whichever one is slower, instead of paying for both
+    back to back. main() still waits on self.ready right before actually
+    pointing the window at the real URL — Qt doesn't retry a load that hits
+    a refused connection, it just shows an error page — but by then this
+    thread has had the entire window-setup time to finish in, so that wait
+    is normally already over before it's reached.
+    """
 
     def __init__(self):
         super().__init__(daemon=True)
-        self.server = make_server(HOST, PORT, app)
+        self.server = None
+        self.ready = threading.Event()
 
     def run(self):
+        from app import app
+        # threaded=True: see the matching comment on app.run() in app.py's
+        # own __main__ block — same server, same single-request-at-a-time
+        # default otherwise, same fix.
+        self.server = make_server(HOST, PORT, app, threaded=True)
+        self.ready.set()
         self.server.serve_forever()
 
     def stop(self):
+        self.ready.wait()
         self.server.shutdown()
 
 
@@ -85,16 +106,27 @@ def _fix_qt_clipboard_permission():
 
 
 def main():
-    _fix_qt_clipboard_permission()
-
+    # Started first, before any Qt/WebEngine setup below, so its import work
+    # (see ServerThread) runs concurrently with — not before — that setup.
     server = ServerThread()
     server.start()
+
+    _fix_qt_clipboard_permission()
 
     webview.create_window(
         "PrettyCAS", f"http://{HOST}:{PORT}/",
         width=1280, height=860, min_size=(760, 600),
     )
     try:
+        # create_window() above only registers the window; it's webview.
+        # start() below that actually fires off loading the URL it was given
+        # — so this is the last possible moment to make sure the backend
+        # exists first. Everything since server.start() (the Qt imports and
+        # window setup above) has already been running concurrently with
+        # that import, so this normally finds ready already set and returns
+        # immediately; it only actually blocks if Qt genuinely won that race.
+        server.ready.wait()
+
         # pywebview defaults to private_mode=True (like a browser's private
         # window) — on the Qt backend that's an in-memory-only
         # QWebEngineProfile with no persistent storage path set, and on the
