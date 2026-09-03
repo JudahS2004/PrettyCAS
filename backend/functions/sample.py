@@ -1,7 +1,7 @@
 import numpy as np
 import sympy as sp
 
-from .mathjson import to_sympy, substitute_functions
+from .mathjson import to_sympy, substitute_functions, sympify_constant
 
 
 def _linspace(lo, hi, n):
@@ -21,7 +21,7 @@ def _build_callable(mathjson, var_names, angle_mode, constants, functions=None):
     if functions:
         expr = substitute_functions(expr, functions, angle_mode)
     if constants:
-        expr = expr.subs({sp.Symbol(name): value for name, value in constants.items()})
+        expr = expr.subs({sp.Symbol(name): sympify_constant(value) for name, value in constants.items()})
     symbols = [sp.Symbol(name) for name in var_names]
     # complex128 output even for real-valued expressions: sqrt/log/asin of an
     # out-of-domain input should come back as a (filterable) complex number

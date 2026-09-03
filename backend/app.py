@@ -38,8 +38,8 @@ if getattr(sys, "frozen", False):
 else:
     FRONTEND_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 FRONTEND_FILES = {
-    "index.html", "shell.js", "compute-engine.js", "app.js", "plot.js", "help.js",
-    "api.js", "settings.js", "history.js", "workspace.js", "background-fx.js", "theme-init.js", "styles.css",
+    "index.html", "shell.js", "compute-engine.js", "pages/app.js", "pages/plot.js", "pages/help.js",
+    "api.js", "settings.js", "history.js", "workspace.js", "theme/background-fx.js", "theme/theme-init.js", "styles.css",
 }
 
 
@@ -103,6 +103,7 @@ def compute_route():
         "simplify_mode": body.get("simplify_mode"),
         "solve_for": body.get("solve_for"),
         "number_format": body.get("number_format"),
+        "complex_form": body.get("complex_form"),
         # The frontend's session workspace (see workspace.js) — earlier
         # "name = ..." inputs, substituted into this one the same way a
         # plot row's slider constants already are for /api/sample.

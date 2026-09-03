@@ -678,6 +678,7 @@ button.secondary:hover {
 .output-render {
   font-size: calc(1.45rem * var(--math-scale, 1));
   overflow-x: auto;
+  overflow-y: hidden;
   padding: 0.5rem 0.25rem;
   line-height: 1.6;
   color: var(--text);
@@ -689,7 +690,15 @@ button.secondary:hover {
   gap: 0.9rem;
 }
 
-.result-line { overflow-x: auto; }
+/* overflow-y: hidden alongside overflow-x is deliberate, not redundant: per
+   the CSS spec, a "visible" value on one axis is force-computed to "auto"
+   when the other axis is auto/scroll — so overflow-x: auto alone silently
+   turns overflow-y into auto too, producing a stray vertical scrollbar
+   whenever content is even a pixel taller than the box (a tall fraction/
+   matrix glyph, e.g.). Setting overflow-y: hidden explicitly opts out of
+   that coercion; nothing here needs to clip vertically since the container
+   has no height cap. */
+.result-line { overflow-x: auto; overflow-y: hidden; }
 
 .output-panel[data-mode="error"] .output-render {
   font-size: 1rem;
@@ -1137,6 +1146,7 @@ details.history[open] summary::before { transform: rotate(90deg); }
 .help-example-math {
   font-size: calc(1.2rem * var(--math-scale, 1));
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .help-example-note {
@@ -1156,6 +1166,7 @@ details.history[open] summary::before { transform: rotate(90deg); }
   gap: 0.4rem;
   font-size: 1.15rem;
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .help-result-sep { color: var(--text-faint); }

@@ -1,0 +1,5 @@
+# Test-only dependencies — deliberately kept out of requirements.txt so
+# PyInstaller's bundled venv (see prettycas.spec/install-linux.sh) never
+# ships pytest inside the shipped desktop app. Install with:
+#   backend/.venv/bin/pip install -r backend/requirements-dev.txt
+pytest>=7.0

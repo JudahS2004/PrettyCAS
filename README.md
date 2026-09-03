@@ -93,6 +93,9 @@ This opens PrettyCAS in a native window directly, without a Start Menu / app-lau
 - `backend/app.py`  Flask routes (`/api/compute`, `/api/sample`, `/api/export`, `/api/capabilities`) and static frontend serving.
 - `backend/desktop.py`  desktop entry point (runs the Flask server + a pywebview window).
 - `backend/functions/`  MathJSON -> SymPy conversion, compute dispatch, solvers, plot sampling/export. `maxima_bridge.py` is an optional fallback to a system `maxima` install for integrals SymPy can't close.
-- `frontend/`  single-page app: `index.html`/`shell.js` own shared chrome and switch between views (no separate HTML pages per view). `app.js` (Compute), `plot.js` (Plot), `help.js` (Help, self-tests its examples against the live backend), Misc (placeholder, inline markup in `index.html`).
+- `frontend/`  single-page app: `index.html`/`shell.js` own shared chrome and switch between views (no separate HTML pages per view). `pages/app.js` (Compute), `pages/plot.js` (Plot), `pages/help.js` (Help, self-tests its examples against the live backend), Misc (placeholder, inline markup in `index.html`). `theme/`  appearance/animation: `theme-init.js` (pre-paint theme flash guard) and `background-fx.js` (the canvas background effects).
 - `prettycas.spec`  PyInstaller build spec. Swap `icons/icon.svg`/`icons/icon.png`/`icons/icon.ico` (same filenames) to rebrand.
 - `icons/`  the app icon (SVG source plus generated PNG/ICO).
+- `scripts/test.sh`  runs the whole test suite (see Testing above).
+- `backend/tests/`, `backend/requirements-dev.txt`  pytest suite and its test-only dependency.
+- `frontend/tests/`  headless-Chromium E2E suite (`node --test`).

@@ -29,3 +29,19 @@ globalThis.MathfieldElement.computeEngine = ce;
 // other passes (integer/whole-number folding, "2x" -> Multiply(2,x), sum/
 // product ordering, etc.) are all still needed and stay on.
 export const PARSE_CANONICAL = ['InvisibleOperator', 'Number', 'Multiply', 'Add', 'Power', 'Flatten', 'Order'];
+
+// Fallback canonical list, only reached when PARSE_CANONICAL itself throws
+// (rather than just failing isValid) — confirmed on a unary minus directly
+// in front of a \frac whose numerator isn't a bare number, e.g.
+// "-\frac{x^2}{2}" or an integrand like "\exp(-x^2/(2\sin^2\theta))":
+// compute-engine's "Negate" canonicalization can't cope with an
+// uncanonicalized "Divide" underneath it and throws "Not canonical" instead
+// of returning an invalid box. Putting "Divide" back in fixes that, at the
+// cost of the eager-decimal-rounding behavior PARSE_CANONICAL above exists
+// to avoid — acceptable here since this list is only ever tried as a rescue
+// after the precision-preserving one has already failed outright, never as
+// the default path. "Divide" has to sit right after "Number" (not appended
+// at the end) — tried at the end first and it still threw "Not canonical",
+// so canonicalization pass order matters here, not just which passes run.
+export const PARSE_CANONICAL_WITH_DIVIDE =
+  ['InvisibleOperator', 'Number', 'Divide', 'Multiply', 'Add', 'Power', 'Flatten', 'Order'];

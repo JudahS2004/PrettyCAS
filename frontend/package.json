@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/e2e.test.js"
   },
   "keywords": [],
   "author": "",
@@ -14,5 +14,8 @@
     "@cortex-js/compute-engine": "^0.111.0",
     "mathlive": "^0.110.0",
     "plotly.js-gl3d-dist-min": "^3.7.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.9.0"
   }
 }

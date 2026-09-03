@@ -1,9 +1,9 @@
-import './node_modules/mathlive/mathlive.min.mjs';
-import { compile } from './node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js';
-import { computeMathJson, sampleMathJson, exportPlot } from './api.js';
-import { getSettings, onSettingsChange } from './settings.js';
-import { ce, PARSE_CANONICAL } from './compute-engine.js';
-import { getFunctions } from './workspace.js';
+import '../node_modules/mathlive/mathlive.min.mjs';
+import { compile } from '../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js';
+import { computeMathJson, sampleMathJson, exportPlot } from '../api.js';
+import { getSettings, onSettingsChange } from '../settings.js';
+import { ce, PARSE_CANONICAL, PARSE_CANONICAL_WITH_DIVIDE } from '../compute-engine.js';
+import { getFunctions } from '../workspace.js';
 
 // Desmos-style per-expression colors, assigned round-robin as rows are added
 // (and reused for the row's color-picker swatches). An 8th "custom" swatch
@@ -50,6 +50,23 @@ const DEFAULT_DOMAIN = { min: -10, max: 10, xMin: -10, xMax: 10, yMin: -10, yMax
 // from becoming a syntax error.
 function normalizeLatex(latex) {
   return wrapLeibnizArguments(latex.replace(/\\differentialD\s*/g, 'd'));
+}
+
+// See app.js's parseLatex: PARSE_CANONICAL can throw outright (not just
+// come back invalid) on a narrow class of otherwise-legitimate input, e.g.
+// a unary minus directly in front of a \frac with a non-numeric numerator.
+// PARSE_CANONICAL_WITH_DIVIDE is a rescue attempt, only ever reached after
+// the precision-preserving list has already thrown.
+function parseLatex(latex) {
+  try {
+    return ce.parse(latex, { canonical: PARSE_CANONICAL });
+  } catch {
+    try {
+      return ce.parse(latex, { canonical: PARSE_CANONICAL_WITH_DIVIDE });
+    } catch {
+      return null;
+    }
+  }
 }
 
 // See app.js: compute-engine's LaTeX parser treats "\frac{d}{dx}" as a
@@ -620,7 +637,9 @@ async function fetchImplicitSolve(row, cacheKey, target, domainVar, constantValu
 
   let mathjson;
   try {
-    mathjson = ce.parse(normalizeLatex(row.mf.getValue('latex')), { canonical: PARSE_CANONICAL }).json;
+    const parsed = parseLatex(normalizeLatex(row.mf.getValue('latex')));
+    if (!parsed) throw new Error('unparseable input');
+    mathjson = parsed.json;
   } catch (err) {
     if (isStale()) return;
     row._implicitCache = { key: cacheKey, state: 'error', message: `Couldn't read this expression: ${err.message || err}` };
@@ -663,7 +682,8 @@ async function fetchImplicitSolve(row, cacheKey, target, domainVar, constantValu
     // Backend returns "<name> = <expr>" per branch; only the expr matters.
     const rhsLatex = branchLatex.includes('=') ? branchLatex.slice(branchLatex.indexOf('=') + 1) : branchLatex;
     try {
-      const branchExpr = ce.parse(rhsLatex, { canonical: PARSE_CANONICAL });
+      const branchExpr = parseLatex(rhsLatex);
+      if (!branchExpr) continue;
       const branchVars = [...new Set(branchExpr.unknowns)].filter((v) => !(v in constantValues));
       if (branchVars.length !== 1) continue; // shouldn't happen; skip rather than crash the row
       branches.push({ vars: branchVars, mathjson: branchExpr.json });
@@ -723,12 +743,7 @@ function classifyRows() {
       row.assignmentParts = null;
       continue;
     }
-    let parsed = null;
-    try {
-      parsed = ce.parse(normalizeLatex(latex), { canonical: PARSE_CANONICAL });
-    } catch {
-      parsed = null;
-    }
+    const parsed = parseLatex(normalizeLatex(latex));
     if (!parsed || !parsed.isValid) {
       row.kind = 'error';
       row.errorMessage = "Couldn't parse this.";

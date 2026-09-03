@@ -1,6 +1,24 @@
 import sympy as sp
 from sympy.polys.polyroots import roots_cubic
 
+from ..mathjson import _run_with_timeout
+
+# sp.solve has no native timeout either (same story as sp.integrate — see
+# mathjson.py's own comment on _run_with_timeout), and it can genuinely hang
+# well past what's reasonable for an interactive calculator: confirmed live
+# with an otherwise-ordinary equation (a base-10-log path-loss formula,
+# solved for one variable with a second left symbolic) that a plain
+# sp.solve() call didn't return within 30+ seconds — the explicit base-10
+# log construction (log(x, 10) is log(x)/log(10) from construction on, see
+# format_result.py's own comment on this) leaves the exact irrational
+# log(10) mixed in among float coefficients substituted from workspace
+# constants, and sp.solve's default strategy apparently doesn't handle that
+# mixture gracefully. A slightly longer allowance than INTEGRATION_TIMEOUT's
+# 2s: an equation solve is the primary thing most inputs to this app are
+# waiting on (not a background retry the way the integral timeout mostly
+# is), so it's worth giving sp.solve a bit more rope before giving up.
+SOLVE_TIMEOUT = 4  # seconds
+
 
 def _real_cubic_trig_form(expr, symbol):
     """A cubic with three distinct real roots (discriminant > 0 — the
@@ -43,8 +61,10 @@ def try_algebraic(expr, symbol):
     caller should fall back to a numerical method.
     """
     try:
-        solutions = sp.solve(expr, symbol)
+        solutions = _run_with_timeout(sp.solve, expr, symbol, on_timeout=None, timeout=SOLVE_TIMEOUT)
     except (NotImplementedError, TypeError):
+        return None
+    if solutions is None:
         return None
 
     if isinstance(solutions, dict):

@@ -9,6 +9,7 @@ const DEFAULTS = {
   decimals: 6,
   angleMode: "rad", // "rad" | "deg"
   simplifyMode: "auto", // "auto" | "expand" | "factor"
+  complexForm: "rectangular", // "rectangular" (a+bi) | "polar" (r*e^(i*theta)) — applies in every number format
   enginePreference: "sympy", // "sympy" | "maxima" — which is tried first for an integral
   autoCompute: true, // whether typing recomputes on its own (see app.js's AUTO_COMPUTE_DELAY_MS) or only Enter does
   // A preset name ("blue" etc.) or an arbitrary "#rrggbb" from the color pickers below.
@@ -334,6 +335,12 @@ export function mountSettingsPanel(container) {
         <label><input type="radio" name="simplifyMode" value="auto"> Auto (simplify)</label>
         <label><input type="radio" name="simplifyMode" value="expand"> Expand</label>
         <label><input type="radio" name="simplifyMode" value="factor"> Factor</label>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>Complex numbers</legend>
+        <label><input type="radio" name="complexForm" value="rectangular"> Rectangular (a + bi)</label>
+        <label><input type="radio" name="complexForm" value="polar"> Polar (r·e^(i&theta;))</label>
       </fieldset>
 
       <fieldset class="settings-group">

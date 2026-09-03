@@ -5,21 +5,32 @@ a native window via pywebview. One command, no separate static server.
     python backend/desktop.py
 
 Forced onto pywebview's Qt backend (QtWebEngine, via the qtpy + PySide6
-requirements) on every platform, deliberately, rather than letting it pick
+requirements) on Linux/Mac, deliberately, rather than letting it pick
 per-OS defaults:
   - On Linux, pywebview tries GTK (WebKit2GTK) before Qt by default, and
     GTK is a system C library PyInstaller can't cleanly bundle into a
     standalone executable — see the WebKitGTK-specific bugs this project
     already hit once (localStorage disabled by default, a menu button that
     silently never un-hides itself) for why that's worth avoiding twice.
-  - On Windows, pywebview's default is `winforms` (WebView2 via pythonnet),
-    which isn't even tried on Linux/Mac, so it'd be a second, untested
-    native backend to trust.
-Qt is pip-installable everywhere (no system dev packages), bundles cleanly
-with PyInstaller, and — same engine on both OSes — only needs verifying
-once instead of per-platform.
+Qt is pip-installable everywhere (no system dev packages) and bundles
+cleanly with PyInstaller.
+
+**Windows is deliberately the one exception** (see `_pick_gui` below):
+QtWebEngine has a confirmed, unfixed upstream bug where any element using
+CSS `backdrop-filter: blur()` — which this app's settings drawer, history
+panel, and most other panels all use throughout — flickers constantly on
+Windows specifically (not Linux, not Mac; other QtWebEngine desktop apps
+hit the exact same thing, e.g. ankitects/anki#4470, closed upstream as
+"not planned"). pywebview's own default Windows backend (`winforms`,
+hosting Microsoft Edge's WebView2 — a different Chromium embedding than
+Qt's bundled one) doesn't have this bug, and needs no extra dependency:
+`pythonnet` (what `winforms` actually needs) is already declared as an
+automatic, Windows-only dependency of the `pywebview` package itself, so
+`pip install -r requirements.txt` already pulls it in on Windows with no
+change needed there — the qtpy/PySide6 lines stay for Linux/Mac.
 """
 
+import platform
 import sys
 import threading
 
@@ -105,13 +116,22 @@ def _fix_qt_clipboard_permission():
     qt_platform.BrowserView.WebPage.onFeaturePermissionRequested = onFeaturePermissionRequested
 
 
+def _pick_gui():
+    """None on Windows (pywebview's own default there already tries
+    winforms/WebView2 first — see this file's own docstring for why that's
+    wanted instead of Qt specifically on Windows), "qt" everywhere else."""
+    return None if platform.system() == "Windows" else "qt"
+
+
 def main():
     # Started first, before any Qt/WebEngine setup below, so its import work
     # (see ServerThread) runs concurrently with — not before — that setup.
     server = ServerThread()
     server.start()
 
-    _fix_qt_clipboard_permission()
+    gui = _pick_gui()
+    if gui == "qt":
+        _fix_qt_clipboard_permission()
 
     webview.create_window(
         "PrettyCAS", f"http://{HOST}:{PORT}/",
@@ -136,10 +156,13 @@ def main():
         # (background effects, sliders, etc. stop reacting to changes)
         # partway through a write. This is a normal desktop app, not an
         # incognito tab, so it should keep its settings between launches.
-        webview.start(private_mode=False, gui="qt")
+        webview.start(private_mode=False, gui=gui)
     except Exception as e:
         print(f"Couldn't open the desktop window ({e}).", file=sys.stderr)
-        print("Make sure qtpy and PySide6 are installed (see requirements.txt).", file=sys.stderr)
+        if gui == "qt":
+            print("Make sure qtpy and PySide6 are installed (see requirements.txt).", file=sys.stderr)
+        else:
+            print("Make sure the Microsoft Edge WebView2 Runtime is installed.", file=sys.stderr)
     finally:
         server.stop()
 

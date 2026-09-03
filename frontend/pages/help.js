@@ -1,7 +1,7 @@
-import './node_modules/mathlive/mathlive.min.mjs';
-import { convertLatexToMarkup } from './node_modules/mathlive/mathlive.min.mjs';
-import { computeMathJson } from './api.js';
-import { getSettings } from './settings.js';
+import '../node_modules/mathlive/mathlive.min.mjs';
+import { convertLatexToMarkup } from '../node_modules/mathlive/mathlive.min.mjs';
+import { computeMathJson } from '../api.js';
+import { getSettings } from '../settings.js';
 
 // Every example here has actually been run through the real parser and
 // backend — not guessed at (each carries its own verified MathJSON rather

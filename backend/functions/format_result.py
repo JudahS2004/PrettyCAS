@@ -1,3 +1,5 @@
+import math
+
 import sympy as sp
 
 # sympy has no notion of an explicit-base logarithm once one is built: sp.log(a, b)
@@ -73,6 +75,24 @@ def _normalize(value):
         return value
 
 
+def _float_precision_cap(value):
+    """The honest number of significant decimal digits an embedded sympy
+    Float within `value` actually carries, or None if `value` has no Float
+    atoms at all — a genuinely exact value (pi, 1/3, sqrt(2), ...), nothing
+    to cap. Shared by cap_decimals below and to_display's own Standard-mode
+    branch.
+    """
+    try:
+        floats = value.atoms(sp.Float)
+    except AttributeError:
+        return None
+    if not floats:
+        return None
+    # bits -> decimal digits, sympy's own rule of thumb (mpmath uses the same
+    # log10(2) factor for dps<->prec conversion).
+    return max(1, min(int(f._prec * 0.3010299956639812) for f in floats))
+
+
 def cap_decimals(value, decimals):
     """The most decimal digits it's honest to ask for when displaying
     `value`: min(requested `decimals`, what's actually known), or just
@@ -99,25 +119,34 @@ def cap_decimals(value, decimals):
     """
     if decimals is None:
         return None
-    value = _normalize(value)
-    try:
-        floats = value.atoms(sp.Float)
-    except AttributeError:
-        return decimals
-    if not floats:
-        return decimals
-    # bits -> decimal digits, sympy's own rule of thumb (mpmath uses the same
-    # log10(2) factor for dps<->prec conversion).
-    cap = max(1, min(int(f._prec * 0.3010299956639812) for f in floats))
-    return min(decimals, cap)
+    cap = _float_precision_cap(_normalize(value))
+    return decimals if cap is None else min(decimals, cap)
 
 
 def to_display(value, decimals):
     """Apply decimal-mode formatting (arbitrary precision, via evalf) to a
-    result on its way out. In standard/exact mode (decimals is None), leaves
-    it untouched except to deepen otherwise-uninformative complex results."""
+    result on its way out. In standard/exact mode (decimals is None),
+    leaves a genuinely exact value untouched (besides deepening otherwise-
+    uninformative complex results) — but a value that already carries an
+    embedded Float isn't a clean exact form to begin with, whatever mode
+    asked for it: e.g. log_10(x) is log(x)/log(10) from construction (see
+    to_latex's own comment on this), and log(10) stays exact while a Float
+    coefficient substituted in from elsewhere in the same expression does
+    not, so a solve/simplify pass mixing the two can leave a "Standard"
+    result with dozens of digits of pure floating-point noise rather than
+    real precision — confirmed live with a base-10-log equation solve.
+    Capped to that Float's own honest precision the same way Decimal/
+    Engineering mode already is via cap_decimals, just applied here too.
+    """
     if decimals is None:
-        return _deepen_complex_inverses(value)
+        value = _deepen_complex_inverses(value)
+        cap = _float_precision_cap(_normalize(value))
+        if cap is None:
+            return value
+        try:
+            return value.evalf(cap)
+        except Exception:
+            return value
     value = _normalize(value)
     decimals = cap_decimals(value, decimals)
     try:
@@ -144,7 +173,14 @@ def to_engineering(value, decimals):
         return None
     try:
         x = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(x):
+        # A magnitude so large float() itself can't represent it (mpmath
+        # converts an out-of-double-range Float to inf rather than raising)
+        # — "12.3e6"-style notation has no meaning for that anyway; the
+        # caller's plain str()/latex() (already scientific-notation-safe,
+        # see _safe_str_latex in compute.py) is the sane fallback.
         return None
 
     if x == 0:

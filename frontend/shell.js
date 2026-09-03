@@ -5,7 +5,7 @@
 // and the view-switching logic that replaces what used to be real page
 // navigations (see index.html's <main data-view> landmarks).
 import { getSettings, onSettingsChange, mountSettingsPanel, updateSetting } from './settings.js';
-import { mount as mountCompute } from './app.js';
+import { mount as mountCompute } from './pages/app.js';
 
 // ---------- Shared chrome ----------
 
@@ -71,10 +71,10 @@ async function switchView(view) {
     mounted.add(view);
     if (view === 'plot') {
       await ensurePlotlyLoaded();
-      plotModule = await import('./plot.js');
+      plotModule = await import('./pages/plot.js');
       plotModule.mount();
     } else if (view === 'help') {
-      const helpModule = await import('./help.js');
+      const helpModule = await import('./pages/help.js');
       helpModule.mount();
     }
     // 'misc' has no module — its markup is static, nothing to mount.

@@ -1,18 +1,18 @@
-import './node_modules/mathlive/mathlive.min.mjs';
-import { compile } from './node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js';
-import { convertLatexToMarkup } from './node_modules/mathlive/mathlive.min.mjs';
-import { computeMathJson } from './api.js';
-import { getSettings, onSettingsChange, updateSetting } from './settings.js';
-import { addEntry, mountHistory } from './history.js';
-import { getWorkspace, setVar, getFunctions, setFunction, mountWorkspace } from './workspace.js';
-import { ce, PARSE_CANONICAL, USER_FUNCTION_NAMES } from './compute-engine.js';
+import '../node_modules/mathlive/mathlive.min.mjs';
+import { compile } from '../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js';
+import { convertLatexToMarkup } from '../node_modules/mathlive/mathlive.min.mjs';
+import { computeMathJson } from '../api.js';
+import { getSettings, onSettingsChange, updateSetting } from '../settings.js';
+import { addEntry, mountHistory } from '../history.js';
+import { getWorkspace, setVar, getFunctions, setFunction, mountWorkspace } from '../workspace.js';
+import { ce, PARSE_CANONICAL, PARSE_CANONICAL_WITH_DIVIDE, USER_FUNCTION_NAMES } from '../compute-engine.js';
 
 // Settings that feed the backend computation itself: changing any of these
 // invalidates the last response, so it's re-sent rather than just re-rendered.
 // numberFormat is deliberately not here — the backend sends back every
 // format (standard/decimal/engineering) up front in `formats` (see
 // withFormat below), so flipping that toggle is a local re-render instead.
-const RECOMPUTE_KEYS = ['angleMode', 'decimals', 'simplifyMode'];
+const RECOMPUTE_KEYS = ['angleMode', 'decimals', 'simplifyMode', 'complexForm'];
 
 // Front-page quick toggles: each is a single button that cycles through its
 // values on click and just states the current one, rather than a segmented
@@ -45,6 +45,25 @@ const CYCLE_OPTIONS = {
 // syntax error the moment MathLive "straightens" the input.
 function normalizeLatex(latex) {
   return wrapLeibnizArguments(latex.replace(/\\differentialD\s*/g, 'd'));
+}
+
+// ce.parse() under PARSE_CANONICAL can throw outright (not just come back
+// invalid) on a narrow class of otherwise-legitimate input — see
+// PARSE_CANONICAL_WITH_DIVIDE's comment in compute-engine.js for the actual
+// bug. Retrying with that fallback list turns those cases into a real parse
+// instead of a false "Syntax error", without weakening the precision
+// PARSE_CANONICAL protects for every other input (the fallback only ever
+// runs after the primary list has already thrown).
+function parseLatex(latex) {
+  try {
+    return ce.parse(latex, { canonical: PARSE_CANONICAL });
+  } catch {
+    try {
+      return ce.parse(latex, { canonical: PARSE_CANONICAL_WITH_DIVIDE });
+    } catch {
+      return null;
+    }
+  }
 }
 
 // compute-engine's LaTeX parser treats "\frac{d}{dx}" as a prefix operator
@@ -254,7 +273,71 @@ let lastResponse = null;
 // PARSE_CANONICAL above actually applies — the math-field's own math-json
 // serialization calls ce.parse() internally with no way to pass options.
 function getMathJson() {
-  return ce.parse(normalizeLatex(mf.getValue('latex')), { canonical: PARSE_CANONICAL }).json;
+  return parseLatex(normalizeLatex(mf.getValue('latex'))).json;
+}
+
+// Flattens a bare symbol, or a Subscript(base, sub) node whose base and
+// subscript are themselves bare symbols (\mu_r, k_B, ...), into one name
+// string — mirrors sympy's own Symbol("base_sub") convention on the backend
+// (mathjson.py's OPS["Subscript"]) so the two stay in lockstep as the same
+// workspace key. A digit subscript never reaches the Subscript branch at
+// all: compute-engine's parser already flattens "X_1" straight to the
+// symbol string "X_1" itself, before this ever runs.
+function symbolName(box) {
+  if (typeof box?.symbol === 'string') return box.symbol;
+  if (box?.operator === 'Subscript') {
+    const [base, sub] = box.ops || [];
+    const baseName = symbolName(base);
+    const subName = symbolName(sub);
+    if (baseName && subName) return `${baseName}_${subName}`;
+  }
+  return null;
+}
+
+// compute-engine's own `.unknowns`/`.freeVariables`/`.symbols` getters all
+// report a \int/\sum/\prod's own bound variable as a free unknown —
+// confirmed live: `\int_2^{400}x\,dx` reports "x" as free even though it's
+// fully bound by the integral itself, identically for `.freeVariables`. Used
+// below (isRealAssignment) to decide whether an assignment's RHS is fully
+// resolvable from known constants; with the buggy getter, any assignment
+// whose RHS is an integral/sum/product looked like it had a stray unresolved
+// symbol, so "Z = \int_2^{400}x\,dx" silently never saved to Z (isRealAssignment
+// false skipped the save entirely), and worse, "A = \int_2^{400}x\,dx" with A
+// already saved substituted A's *old* value back in as if this were a
+// true/false check instead of a reassignment. `boundVariableNames` mirrors
+// exactly the shapes backend/functions/mathjson.py's own to_sympy already
+// relies on for these same three ops (`_BOUNDED_OPS`'s `[body, ["Tuple",
+// var, lo, hi]]` shape for a definite Sum/Product/Integral, or a bare
+// `[body, var]` for an indefinite Integral) plus \lim's own `["Limit",
+// ["Function", body, var], point]` shape.
+function boundVariableNames(node) {
+  if (!Array.isArray(node)) return [];
+  const [op, ...args] = node;
+  if ((op === 'Integrate' || op === 'Sum' || op === 'Product') && args.length >= 2) {
+    const spec = args[args.length - 1];
+    if (Array.isArray(spec) && spec[0] === 'Tuple' && typeof spec[1] === 'string') return [spec[1]];
+    if (typeof spec === 'string') return [spec];
+  }
+  if (op === 'Limit' && Array.isArray(args[0]) && args[0][0] === 'Function') {
+    return args[0].slice(2).filter((a) => typeof a === 'string');
+  }
+  return [];
+}
+
+// The actual free symbol names in a raw MathJSON tree (as from a boxed
+// expression's own `.json`), correctly excluding whatever boundVariableNames
+// says a \int/\sum/\prod/\lim node binds within itself — see its own comment
+// on why this exists instead of just using compute-engine's `.unknowns`.
+function freeSymbolsOf(node, bound = new Set()) {
+  if (typeof node === 'string') return bound.has(node) ? new Set() : new Set([node]);
+  if (!Array.isArray(node)) return new Set();
+  const [, ...args] = node;
+  const localBound = new Set([...bound, ...boundVariableNames(node)]);
+  const result = new Set();
+  for (const arg of args) {
+    for (const sym of freeSymbolsOf(arg, localBound)) result.add(sym);
+  }
+  return result;
 }
 
 // Same idea as the Plot page's constant-row detection: "a = <rhs>" (bare
@@ -262,25 +345,33 @@ function getMathJson() {
 // rather than raw mathjson) names a workspace assignment worth remembering.
 function getAssignmentParts(parsed) {
   if (parsed.operator !== 'Equal') return null;
-  if (typeof parsed.op1?.symbol === 'string') return { name: parsed.op1.symbol, rhs: parsed.op2 };
-  if (typeof parsed.op2?.symbol === 'string') return { name: parsed.op2.symbol, rhs: parsed.op1 };
+  const name1 = symbolName(parsed.op1);
+  if (name1) return { name: name1, rhs: parsed.op2 };
+  const name2 = symbolName(parsed.op2);
+  if (name2) return { name: name2, rhs: parsed.op1 };
   return null;
 }
 
 // Same idea as getAssignmentParts, but for "f(x) = <rhs>" defining a
-// function instead of a variable. Only f/g/h can be the target — those are
-// the only names compute-engine parses call-parens on as a function
-// application at all (see compute-engine.js's ce.declare); any other
-// letter followed by parens parses as multiplication, so e.g. "p(x) = x^2"
-// never reaches here shaped like a function definition to begin with. The
-// call's arguments all have to be bare symbols (the parameter list, e.g.
-// "x" in f(x)) — this is what keeps a genuine equation like "sin(x) = 1"
-// (op1.operator "Sin", not a user function name) from ever matching, and
-// guards against something like "f(x^2) = ..." that isn't a parameter list.
+// function instead of a variable. The target has to be a name
+// compute-engine parses call-parens on as a function application at all —
+// f/g/h (explicitly declared in compute-engine.js) or, confirmed live, any
+// single uppercase letter at all (its own built-in convention: "Q(x)"
+// parses straight to ["Q","x"] with no declare() needed, while "p(x)"
+// parses as Multiply("p","x")) — so e.g. "p(x) = x^2" never reaches here
+// shaped like a function definition to begin with. The call's arguments
+// all have to be bare symbols (the parameter list, e.g. "x" in f(x)) —
+// this is what keeps a genuine equation like "sin(x) = 1" (op1.operator
+// "Sin", not a definable name) from ever matching, and guards against
+// something like "f(x^2) = ..." that isn't a parameter list.
+function isDefinableFunctionName(name) {
+  return USER_FUNCTION_NAMES.includes(name) || /^[A-Z]$/.test(name);
+}
+
 function getFunctionDefinitionParts(parsed) {
   if (parsed.operator !== 'Equal') return null;
   const fromCall = (call, rhs) => {
-    if (typeof call?.operator !== 'string' || !USER_FUNCTION_NAMES.includes(call.operator)) return null;
+    if (typeof call?.operator !== 'string' || !isDefinableFunctionName(call.operator)) return null;
     const args = call.ops || [];
     const params = args.map((a) => (typeof a.symbol === 'string' ? a.symbol : null));
     if (params.length === 0 || params.includes(null) || new Set(params).size !== params.length) return null;
@@ -289,13 +380,32 @@ function getFunctionDefinitionParts(parsed) {
   return fromCall(parsed.op1, parsed.op2) || fromCall(parsed.op2, parsed.op1);
 }
 
+// No `realOnly: true` here (unlike plot.js's own copy, which feeds a
+// real-valued slider and should keep rejecting complex results): a
+// workspace assignment like "X = 50 - 30i" is a completely ordinary input,
+// and realOnly was making compute-engine collapse that compiled result to a
+// bare NaN — Number.isFinite(NaN) then failed the caller's save-to-workspace
+// check every time, so a complex assignment displayed correctly but never
+// actually got cached, identically to (and easily mistaken for another
+// instance of) the auto-compute race documented above. Without realOnly,
+// compute-engine's own compiled value for a complex result is a plain `{re,
+// im}` object instead of a JS number — returned here as-is so the caller can
+// cache it into the workspace as a real value; a later expression that
+// itself references a complex-valued workspace variable still isn't
+// supported (compute-engine's compiled JS has no complex-arithmetic
+// operators, so e.g. compiling "X + 1" against a cached {re,im} X produces
+// garbage, not a real result) and correctly falls through to `null` below,
+// same known-gap shape as the workspace-function-call limit documented
+// elsewhere in this file.
 function evalNumeric(expr, vars) {
   try {
-    const compiled = compile(expr, { realOnly: true });
+    const compiled = compile(expr, {});
     const value = compiled.run(vars);
-    return typeof value === 'number' ? value : NaN;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (value && Number.isFinite(value.re) && Number.isFinite(value.im)) return value;
+    return null;
   } catch {
-    return NaN;
+    return null;
   }
 }
 
@@ -427,6 +537,23 @@ function render(response) {
 // had already cleared and moved on from.
 let currentComputeController = null;
 
+// True while a saveToHistory compute (Enter) is between dispatching its
+// /api/compute request and that request resolving. The debounced
+// auto-compute timer (armed on every keystroke, including ones mathlive
+// itself fires as a side effect of handling Enter) checks this before
+// calling runComputeIfNonEmpty(false) — otherwise it can fire while an
+// Enter-triggered request is still in flight, and runCompute()'s own
+// currentComputeController.abort() kills that request before it ever
+// reaches the code that saves to history/workspace. The auto-compute's own
+// result still renders fine in that case (nothing looks wrong on screen),
+// which is what made this so easy to mistake for "assignment just doesn't
+// save" rather than a race — confirmed live: function definitions never
+// hit this because they resolve synchronously with no network round trip
+// in between, so there's no window for anything to interrupt them; a
+// variable assignment's evalNumeric()/setVar() call only happens after
+// awaiting the backend response, which is exactly that window.
+let historyComputeInFlight = false;
+
 async function runCompute(saveToHistory = false) {
   currentComputeController?.abort();
   const controller = new AbortController();
@@ -439,12 +566,7 @@ async function runCompute(saveToHistory = false) {
   // otherwise sail past getMathJson() and hit the backend as a garbled
   // expression it can't make sense of. Catching invalid input here, before
   // ever sending it, is what turns that into a clean "Syntax error" instead.
-  let parsed;
-  try {
-    parsed = ce.parse(normalizeLatex(latex), { canonical: PARSE_CANONICAL });
-  } catch {
-    parsed = null;
-  }
+  const parsed = parseLatex(normalizeLatex(latex));
   if (!parsed || !parsed.isValid) {
     const response = { mode: 'error', result: 'Syntax error — check your input.' };
     lastResponse = response;
@@ -488,12 +610,28 @@ async function runCompute(saveToHistory = false) {
   // constants sent along for *this* computation, otherwise substituting a's
   // old value into "a = 3" would turn the assignment into a true/false
   // check of the old value against the new one instead of solving/defining it.
+  //
+  // But that's only valid when rhs can actually resolve to a plain number
+  // from the rest of the workspace — a workspace variable is never anything
+  // but a plain number (see workspace.js), so if rhs still has a genuinely
+  // unknown symbol (e.g. re-typing "L_u = ..." as an equation to solve for
+  // some other variable, with L_u itself already saved), this was never
+  // going to succeed as a redefinition anyway: nothing ends up saved either
+  // way, but stripping the name here would also break the equation itself,
+  // discarding the one thing (L_u's own saved value) needed to solve it.
+  // freeSymbolsOf (not compute-engine's own `.unknowns` — see its own
+  // comment) mirrors plot.js's own free-symbol check; the assignment's own
+  // name is always allowed through so a self-referencing case like
+  // "x = 2x + 1" still resolves (and saves) exactly as before.
   const assignment = getAssignmentParts(parsed);
   const constants = getWorkspace();
-  if (assignment) delete constants[assignment.name];
+  const isRealAssignment = assignment
+    && [...freeSymbolsOf(assignment.rhs.json)].every((sym) => sym === assignment.name || sym in constants);
+  if (isRealAssignment) delete constants[assignment.name];
   const functions = getFunctions();
 
   let response;
+  if (saveToHistory) historyComputeInFlight = true;
   try {
     response = await computeMathJson(mathjson, getSettings(), { constants, functions }, controller.signal);
   } catch (err) {
@@ -503,18 +641,37 @@ async function runCompute(saveToHistory = false) {
     // whatever's already on screen for the request that actually won.
     if (err.name === 'AbortError') return;
     response = { mode: 'error', result: String(err.message || err) };
+  } finally {
+    if (saveToHistory) historyComputeInFlight = false;
   }
 
   lastResponse = response;
   render(response);
   if (saveToHistory) {
     addEntry(mf.getValue('latex'), summarize(response));
-    if (assignment && response.mode !== 'error') {
-      // Evaluated locally (not taken from the backend response) so the
-      // stored value keeps full double precision regardless of the
-      // current decimals/number-format display setting.
-      const value = evalNumeric(assignment.rhs, getWorkspace());
-      if (Number.isFinite(value)) setVar(assignment.name, value);
+    if (isRealAssignment && response.mode !== 'error') {
+      // Prefer the backend's own full-double-precision numeric value
+      // (response.numeric — see compute.py's _numeric_value) over a local
+      // recompile: the backend already substituted workspace constants and
+      // functions to resolve the RHS, so it has no trouble with an RHS that
+      // itself references an already-complex workspace variable ("Gamma =
+      // (Zl-Z0)/(Zl+Z0)" with Zl/Z0 complex) or calls a workspace function —
+      // both cases evalNumeric's local compute-engine compile can't handle
+      // (see its own comment) and would otherwise silently fail to save.
+      // evalNumeric stays as a fallback for the rare kind _render doesn't
+      // attach `numeric` to.
+      const value = response.numeric !== undefined && response.numeric !== null
+        ? response.numeric
+        : evalNumeric(assignment.rhs, getWorkspace());
+      // response.exact (compute.py's _exact_mathjson) is the symbolic form
+      // of the same value, e.g. sqrt(2)/2 rather than 0.7071067811865476 —
+      // cached alongside `value` so a later computation that reuses this
+      // name substitutes the exact expression instead of a decimal
+      // approximation of it (see workspace.js's setVar/getWorkspace).
+      // Undefined for a kind _render doesn't attach it to (falls through to
+      // decimal-only, same as before this existed) or a value with no exact
+      // form to begin with.
+      if (value !== null && value !== undefined) setVar(assignment.name, value, response.exact);
     }
   }
 }
@@ -613,7 +770,16 @@ export function mount() {
     fixToggleLayout();
     clearTimeout(inputRunTimer);
     if (!getSettings().autoCompute) return;
-    inputRunTimer = setTimeout(() => runComputeIfNonEmpty(false), AUTO_COMPUTE_DELAY_MS);
+    inputRunTimer = setTimeout(() => {
+      // Skip entirely rather than let this go on to call runCompute():
+      // runCompute() unconditionally aborts whatever's currently in flight,
+      // and a saveToHistory request already has this input's real result on
+      // the way — an auto-compute here would only abort it out from under
+      // itself, right before it reaches the code that saves to
+      // history/workspace, for a render that would look identical anyway.
+      if (historyComputeInFlight) return;
+      runComputeIfNonEmpty(false);
+    }, AUTO_COMPUTE_DELAY_MS);
   });
 
   mf.addEventListener('keydown', (event) => {
@@ -648,11 +814,8 @@ export function mount() {
     const active = withFormat(lastResponse, settings.numberFormat);
     let text;
     if (settings.copyFormat === 'mathjson' && active.latex) {
-      try {
-        text = JSON.stringify(ce.parse(active.latex, { canonical: PARSE_CANONICAL }).json);
-      } catch {
-        text = active.latex;
-      }
+      const box = parseLatex(active.latex);
+      text = box ? JSON.stringify(box.json) : active.latex;
     } else if (active.latex) {
       text = active.latex;
     } else if (Array.isArray(active.result)) {

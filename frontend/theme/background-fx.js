@@ -1,4 +1,4 @@
-import { getSettings, onSettingsChange } from './settings.js';
+import { getSettings, onSettingsChange } from '../settings.js';
 
 const GLYPHS = '0123456789+-=×÷·∑∫√∞ππθλΔ∂∇≈≠≤≥∈∀∃∴'.split('');
 const FONT_SIZE = 18;

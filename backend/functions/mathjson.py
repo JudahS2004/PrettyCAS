@@ -13,6 +13,138 @@ CONSTS = {
     "PositiveInfinity": sp.oo, "NegativeInfinity": -sp.oo,
 }
 
+
+def sympify_constant(value):
+    """A workspace `constants` entry (compute.py/sample.py, substituted for
+    an earlier "name = ..." input) is normally a bare JSON number, but a
+    complex-valued one ("X = 50 - 30i") arrives as {"re": ..., "im": ...} —
+    frontend/pages/app.js's evalNumeric caches compute-engine's own compiled shape
+    for a complex result there rather than reshaping it before sending, so
+    this is the matching reconstruction back into a real sympy value. A
+    bare dict isn't itself sympifiable (sp.Symbol(...).subs() would raise),
+    so every constants-substitution call site needs to route through this
+    instead of using the raw JSON value directly.
+    """
+    if isinstance(value, list):
+        # A saved matrix variable ("M = [[1,2],[3,4]]") — rows of cells,
+        # each cell itself a bare number or a {re, im} dict, same shape a
+        # plain scalar constant would have on its own. Recurses through
+        # this same function per cell so a complex-valued matrix entry gets
+        # the identical {re, im} reconstruction a scalar one would.
+        return sp.Matrix([[sympify_constant(cell) for cell in row] for row in value])
+    if isinstance(value, dict) and "exact" in value:
+        # A resolved value compute.py could serialize losslessly (see
+        # _exact_mathjson) — the exact symbolic expression itself (e.g.
+        # sqrt(2)/2), not a decimal approximation of it. Round-tripped
+        # straight back through to_sympy the same way any other MathJSON
+        # tree is, since it's built entirely from the same OPS this
+        # function itself already knows how to evaluate.
+        return to_sympy(value["exact"])
+    if isinstance(value, dict) and "re" in value and "im" in value:
+        return value["re"] + value["im"] * sp.I
+    if isinstance(value, float):
+        # Same "parse via the decimal string" treatment to_sympy's own
+        # float-literal branch gives a number typed directly in a formula
+        # (see its comment) — kept an exact Rational (50.0 -> Rational(50,
+        # 1), 1.32 -> Rational(33, 25)) instead of a binary Float
+        # approximation, which is what plain sympify() of a raw Python
+        # float would otherwise produce here. Mixing the two — a literal
+        # typed in the formula (always exact via to_sympy) against a
+        # substituted workspace constant left as a raw Float — is a real,
+        # confirmed-live cause of pathological sp.solve() slowness on an
+        # otherwise perfectly ordinary equation (mixing several explicit-
+        # base logs, e.g. \log_{10}, with float-looking workspace
+        # constants forces sympy into its slow generic EX polynomial domain
+        # instead of a clean QQ/RR one) — slow enough that even the
+        # thread-based _run_with_timeout guard elsewhere in this file
+        # couldn't reliably interrupt it (a single long C-level call inside
+        # sp.solve that never yields the GIL back to the timing thread).
+        return sp.Rational(str(value))
+    return value
+
+
+# Reverse of a subset of the OPS dispatch table below — sympy function class
+# -> the MathJSON op name that reconstructs it. Only covers the functions
+# that can actually turn up in an already-*resolved* value (simplify()'s
+# output), not every op a user could type; anything else falls back to
+# _exact_mathjson returning None, which just means the workspace caches a
+# decimal approximation instead of the exact form for that one value —
+# never a correctness problem, only a precision-of-later-reuse one.
+_EXACT_FUNC_NAMES = {
+    sp.sin: "Sin", sp.cos: "Cos", sp.tan: "Tan", sp.csc: "Csc", sp.sec: "Sec", sp.cot: "Cot",
+    sp.sinh: "Sinh", sp.cosh: "Cosh", sp.tanh: "Tanh", sp.csch: "Csch", sp.sech: "Sech", sp.coth: "Coth",
+    sp.asin: "Arcsin", sp.acos: "Arccos", sp.atan: "Arctan",
+    sp.acsc: "Arccsc", sp.asec: "Arcsec", sp.acot: "Arccot",
+    sp.asinh: "Arsinh", sp.acosh: "Arcosh", sp.atanh: "Artanh",
+    sp.acsch: "Arcsch", sp.asech: "Arsech", sp.acoth: "Arcoth",
+    sp.log: "Ln", sp.exp: "Exp", sp.Abs: "Abs",
+    sp.factorial: "Factorial", sp.gamma: "Gamma", sp.floor: "Floor", sp.ceiling: "Ceil",
+}
+
+
+def _exact_mathjson(expr):
+    """The exact symbolic MathJSON form of an already-resolved sympy value
+    (e.g. sqrt(2)/2), when it can be reconstructed losslessly through
+    to_sympy — None when it can't (a bare Float already lost its exact form
+    upstream, or the expression uses something outside _EXACT_FUNC_NAMES).
+
+    compute.py attaches this to a response alongside the existing decimal
+    `numeric` field specifically so the frontend can cache a workspace
+    assignment's RHS at full symbolic precision instead of only a rounded
+    double: confirmed live, without this, "rho = 1/sqrt(2)" saved a workspace
+    value that later substitutions could only ever see as a ~16-digit
+    decimal-derived Rational, never the clean sqrt(2)/2 it actually was —
+    correct in principle, but that's what turned a later "e^(rho^2)" into a
+    ~31-digit ugly Rational instead of exp(1)/... — an ordinary sqrt(2)/2
+    identity a person would simplify by hand. Only ever applied to an
+    already-fully-resolved value, never a live user expression, so this
+    doesn't need to handle unresolved variables/ops the way to_sympy's OPS
+    table does.
+    """
+    if isinstance(expr, sp.MatrixBase):
+        # A plain matrix-arithmetic result ("[[1,2],[3,4]] + I2") resolves
+        # as kind "evaluate" with a Matrix value, same as any scalar one —
+        # _numeric_value has its own per-cell handling for this shape, but
+        # a matrix workspace variable already round-trips fine as decimal
+        # cells (see sympify_constant's own comment), so this isn't worth
+        # the same exact-form treatment; bail out to the decimal-only path.
+        return None
+    if isinstance(expr, sp.Integer):
+        return int(expr)
+    if isinstance(expr, sp.Rational):
+        return ["Rational", int(expr.p), int(expr.q)]
+    if expr == sp.pi:
+        return "Pi"
+    if expr == sp.E:
+        return "ExponentialE"
+    if expr == sp.I:
+        return "ImaginaryUnit"
+    if expr == sp.oo:
+        return "PositiveInfinity"
+    if expr == -sp.oo:
+        return "NegativeInfinity"
+    if expr.is_Add:
+        parts = [_exact_mathjson(a) for a in expr.args]
+        return None if any(p is None for p in parts) else ["Add", *parts]
+    if expr.is_Mul:
+        parts = [_exact_mathjson(a) for a in expr.args]
+        return None if any(p is None for p in parts) else ["Multiply", *parts]
+    if expr.is_Pow:
+        base, exponent = expr.args
+        b = _exact_mathjson(base)
+        if b is None:
+            return None
+        if exponent == sp.Rational(1, 2):
+            return ["Sqrt", b]
+        e = _exact_mathjson(exponent)
+        return None if e is None else ["Power", b, e]
+    op = _EXACT_FUNC_NAMES.get(expr.func)
+    if op is not None:
+        args = [_exact_mathjson(a) for a in expr.args]
+        return None if any(a is None for a in args) else [op, *args]
+    return None
+
+
 # sympy has no timeout argument anywhere in integrate/simplify/solve/dsolve —
 # checked the actual source, not just the docs (grepped the whole package;
 # the only "timeout" in it is in sympy's own internal test runner). This is
@@ -65,10 +197,57 @@ def _raise(message):
     raise ValueError(message)
 
 
-def _apply(target, arg):
+# f^{-1}(y) (or sin^{-1}(y), etc.) parses as Apply(InverseFunction(f), y) —
+# the inner "InverseFunction" (below) is a curried "the inverse of f, not yet
+# applied to anything" marker, resolved here into the actual inverse
+# evaluated at y. A named elementary function (Sin, Exp, ...) has a known
+# closed-form inverse already sitting right there in OPS, so that case is
+# just a second OPS lookup. Anything else — chiefly a workspace f/g/h — has
+# no formula mathjson.py can see (workspace function bodies live in
+# compute.py's `functions` dict, not here), so it's left as an opaque
+# "__InverseFunctionOf__" marker call for compute.py to resolve once it has
+# that dict, or report "no inverse exists" if the name turns out to have no
+# definition to invert.
+_ELEMENTARY_INVERSES = {
+    "Sin": "Arcsin", "Cos": "Arccos", "Tan": "Arctan",
+    "Csc": "Arccsc", "Sec": "Arcsec", "Cot": "Arccot",
+    "Arcsin": "Sin", "Arccos": "Cos", "Arctan": "Tan",
+    "Arccsc": "Csc", "Arcsec": "Sec", "Arccot": "Cot",
+    "Sinh": "Arsinh", "Cosh": "Arcosh", "Tanh": "Artanh",
+    "Csch": "Arcsch", "Sech": "Arsech", "Coth": "Arcoth",
+    "Arsinh": "Sinh", "Arcosh": "Cosh", "Artanh": "Tanh",
+    "Arcsch": "Csch", "Arsech": "Sech", "Arcoth": "Coth",
+    "Exp": "Ln", "Ln": "Exp",
+}
+
+
+def _apply(target, arg, angle_mode="rad"):
     # ["Apply", ["Derivative", "f", n], "x"] is how f'(x)/f''(x) parse: the
     # inner "Derivative" (below) is a curried "the n-th derivative of f, not
     # yet applied to anything" marker, resolved here into f^(n)(arg).
+    if isinstance(target, tuple) and target and target[0] == "__inv__":
+        name = str(target[1])
+        if name in _ELEMENTARY_INVERSES:
+            resolved_op = _ELEMENTARY_INVERSES[name]
+            # The degree-mode conversions below normally happen in
+            # to_sympy's own dispatch loop, keyed on the *literal* op string
+            # of the node being converted — but that's "Apply" here, not
+            # "Cos"/"Arccos"/etc. (this whole elementary-inverse case is a
+            # second OPS lookup happening entirely inside this function), so
+            # neither conversion ever ran for e.g. \cos^{-1}(0) in degree
+            # mode without doing it explicitly here too. Two directions,
+            # mirroring the outer loop's own two checks: resolved_op's own
+            # *argument* is an angle (\arcsin^{-1}(x) = sin(x), x given in
+            # degrees) needs deg->rad before the call; resolved_op's
+            # *result* is an angle (\cos^{-1}(x) = arccos(x), a radian
+            # result) needs rad->deg after it.
+            if resolved_op in _ANGLE_OPS and angle_mode == "deg":
+                arg = arg * sp.pi / 180
+            result = OPS[resolved_op](arg)
+            if resolved_op in _INVERSE_ANGLE_OPS and angle_mode == "deg":
+                result = result * 180 / sp.pi
+            return result
+        return sp.Function("__InverseFunctionOf__")(target[1], arg)
     if isinstance(target, tuple):
         fn, order = target
         return sp.diff(sp.Function(str(fn))(arg), arg, order)
@@ -122,6 +301,79 @@ def _indefinite_integral(body, var, engine_preference="sympy"):
     return sp.Integral(body, var) + sp.Symbol("C")
 
 
+def _has_resolved_branch(piecewise):
+    """True if at least one branch of a Piecewise is a genuine closed form
+    (no leftover Integral) — the signature of sympy answering a convergence-
+    conditioned integral like integrate(t*exp(-s*t), (t, 0, oo)):
+    Piecewise((1/s**2, |arg(s)| < pi/2), (Integral(...), True)). The first
+    branch there is the real answer; the second is sympy honestly stating
+    that no closed form exists outside that domain, not a stuck computation.
+    That's a complete answer, not a failure — see has_unresolved_integral,
+    which downstream callers use instead of a raw `.has(sp.Integral)` check
+    so this case doesn't get discarded as "no closed form found"."""
+    return any(not value.has(sp.Integral) for value, _cond in piecewise.args)
+
+
+def has_unresolved_integral(expr):
+    """Like expr.has(sp.Integral), but doesn't count an Integral that's just
+    the honest "otherwise" branch of a Piecewise which already has a
+    resolved branch elsewhere (see _has_resolved_branch) — that's a complete
+    conditional answer, not evidence sympy got stuck."""
+    covered = set()
+    for piecewise in expr.atoms(sp.Piecewise):
+        if _has_resolved_branch(piecewise):
+            covered.update(piecewise.atoms(sp.Integral))
+    return any(i not in covered for i in expr.atoms(sp.Integral))
+
+
+def _resolve_definite_integral(body, var, lower, upper):
+    """Tries sp.integrate, then Maxima's exact definite-integral routine,
+    then mpmath numeric quadrature, in that order — factored out of
+    _integrate so retry_unresolved_integrals (below) can reuse the exact
+    same fallback chain on an integral that couldn't attempt any of this at
+    parse time (see that function's own comment for why).
+
+    Capped at INTEGRATION_TIMEOUT rather than letting sympy grind for as
+    long as it takes to give up on its own — a hard case can take much
+    longer than that to conclude "no closed form" by itself, and neither
+    fallback below needs sympy to have actually finished trying in order to
+    kick in.
+    """
+    result = _run_with_timeout(
+        sp.integrate, body, (var, lower, upper),
+        on_timeout=sp.Integral(body, (var, lower, upper)),
+    )
+    if not result.has(sp.Integral):
+        return result
+    # A Piecewise with at least one resolved branch (see _has_resolved_branch)
+    # is already the complete answer — e.g. a Laplace-transform-style integral
+    # over a symbolic parameter like s or sigma, where the "otherwise" branch
+    # is a deliberate convergence-condition fallback, not an unsolved
+    # integral. Maxima and the numeric quadrature fallback below can't do
+    # anything useful with a symbolic parameter anyway, so return this as-is
+    # rather than discarding a correct answer while chasing a "better" one.
+    if isinstance(result, sp.Piecewise) and _has_resolved_branch(result):
+        return result
+    # Maxima's own definite-integral routine can reach an exact closed form
+    # here even for cases its own antiderivative search wouldn't (confirmed
+    # live: zeta(3)/4 - 1/4 for the integral that motivated this whole
+    # bridge, bounded 0 to 1 — the exact answer, not just a decimal
+    # approximation of it). Only falls through to numeric quadrature if
+    # Maxima can't close it either.
+    exact = maxima_bridge.integrate_definite(body, var, lower, upper)
+    if exact is not None:
+        return exact
+    # A definite integral, unlike an indefinite one, always has a single
+    # real number to converge on even when neither symbolic route can close
+    # it — so a numeric fallback is meaningful here specifically. See
+    # _numeric_definite_integral for why this doesn't apply to the
+    # indefinite case above.
+    numeric = _numeric_definite_integral(body, var, lower, upper)
+    if numeric is not None:
+        return numeric
+    return result
+
+
 def _integrate(target, *rest, engine_preference="sympy"):
     body, _params = target if isinstance(target, tuple) else (target, ())
     # A math-field \int gives rest = (("Limits" tuple: var, lower, upper),).
@@ -131,50 +383,64 @@ def _integrate(target, *rest, engine_preference="sympy"):
         var, lower, upper = rest[0]
         if lower is None or upper is None:
             return _indefinite_integral(body, var, engine_preference)
-        # Capped at INTEGRATION_TIMEOUT rather than letting sympy grind for
-        # as long as it takes to give up on its own — a hard case can take
-        # much longer than that to conclude "no closed form" by itself, and
-        # neither fallback below needs sympy to have actually finished
-        # trying in order to kick in.
-        result = _run_with_timeout(
-            sp.integrate, body, (var, lower, upper),
-            on_timeout=sp.Integral(body, (var, lower, upper)),
-        )
-        if result.has(sp.Integral):
-            # Tried unconditionally (not engine_preference-ordered like the
-            # indefinite case above) — sympy's definite integrate() is tried
-            # first regardless, and Maxima's own definite-integral routine
-            # can reach an exact closed form here even for cases its own
-            # antiderivative search wouldn't (confirmed live:
-            # zeta(3)/4 - 1/4 for the integral that motivated this whole
-            # bridge, bounded 0 to 1 — the exact answer, not just a decimal
-            # approximation of it). Only falls through to numeric quadrature
-            # if Maxima can't close it either.
-            exact = maxima_bridge.integrate_definite(body, var, lower, upper)
-            if exact is not None:
-                return exact
-            # A definite integral, unlike an indefinite one, always has a
-            # single real number to converge on even when neither symbolic
-            # route can close it — so a numeric fallback is meaningful here
-            # specifically. See _numeric_definite_integral for why this
-            # doesn't apply to the indefinite case above.
-            numeric = _numeric_definite_integral(body, var, lower, upper)
-            if numeric is not None:
-                return numeric
-        return result
+        return _resolve_definite_integral(body, var, lower, upper)
     if len(rest) == 1:
         return _indefinite_integral(body, rest[0], engine_preference)
     return sp.integrate(body, *rest)
 
 
+def retry_unresolved_integrals(expr):
+    """Re-attempts every unevaluated sp.Integral left in `expr` that's now
+    fully numeric (no free symbols) — meant to be called from compute.py
+    right after workspace-function/constants substitution.
+
+    A workspace function whose body integrates over one variable while
+    depending on its own parameter (e.g. "Q(x) := (1/pi) * integral of
+    exp(-x^2/(2*sin(theta)^2)) dtheta from 0 to pi/2") still has that
+    parameter as a free symbol at the point _integrate first runs, during
+    plain to_sympy conversion of the stored body — workspace substitution
+    (which supplies the concrete value, e.g. x=3) only happens afterward.
+    _resolve_definite_integral's numeric-quadrature fallback needs concrete
+    bounds/integrand and can't run on a still-symbolic one, so an integral
+    like this — no closed form, but perfectly fine to integrate numerically
+    once concrete — got frozen as an unevaluated Integral permanently, even
+    once every input it actually needed became a real number. This redoes
+    the same fallback chain once that's true.
+    """
+    subs = {}
+    for integral in expr.atoms(sp.Integral):
+        if integral in subs or integral.free_symbols or len(integral.limits) != 1:
+            continue
+        limits = integral.limits[0]
+        if len(limits) != 3:
+            continue  # an indefinite integral has no numeric value to fall back to
+        var, lower, upper = limits
+        try:
+            value = _resolve_definite_integral(integral.function, var, lower, upper)
+        except Exception:
+            continue
+        if not (hasattr(value, "has") and value.has(sp.Integral)):
+            subs[integral] = value
+    return expr.subs(subs) if subs else expr
+
+
 def _mp_bound(b):
-    """sp.oo/-sp.oo -> mpmath's own infinities; anything else (a plain
-    number) passes through as-is. Shared by every mpmath fallback below that
-    takes a lower/upper pair from a Limits tuple."""
+    """sp.oo/-sp.oo -> mpmath's own infinities; a plain Python number passes
+    through as-is; a symbolic-but-numeric bound (e.g. sp.pi/2, from typing
+    "\\int_0^{\\pi/2}") is evalf'd first. mpmath.quad/nsum/nprod can't accept
+    a bare sympy expression for an interval endpoint at all — confirmed
+    live, "cannot create mpf from pi/2" — so without this, any bound that
+    isn't already a plain number silently killed the whole numeric fallback
+    (caught by the caller's blanket except and turned into "no closed form"
+    for an integral/sum that's actually perfectly numerically integrable).
+    Shared by every mpmath fallback below that takes a lower/upper pair from
+    a Limits tuple."""
     if b == sp.oo:
         return mpmath.inf
     if b == -sp.oo:
         return -mpmath.inf
+    if isinstance(b, sp.Basic):
+        return mpmath.mpf(str(b.evalf(30)))
     return b
 
 
@@ -284,6 +550,19 @@ def _limit(target, point, *side):
     return sp.limit(body, var, point, dir=direction)
 
 
+def _subscript_part(value):
+    """Renders one side (base or subscript) of a Subscript node as a bare
+    name fragment for joining into "base_sub" — a Symbol contributes its
+    name, an Integer its digits (\\mu_1 never actually reaches here, see
+    OPS["Subscript"]'s comment, but a subscript built from a digit sequence
+    that didn't collapse client-side should still work rather than crash)."""
+    if isinstance(value, sp.Symbol):
+        return value.name
+    if isinstance(value, sp.Integer):
+        return str(value)
+    raise ValueError("couldn't understand a subscripted name")
+
+
 OPS = {
     # Reduced with the plain operators (not sp.Add/sp.Mul) so matrix
     # operands dispatch to Matrix's own __add__/__mul__, which gives correct
@@ -337,11 +616,17 @@ OPS = {
     "List": lambda *items: list(items),
     "Tuple": lambda *items: _raise("couldn't understand part of this input"),
     "Set": lambda *items: list(items),
-    "Matrix": lambda rows: sp.Matrix(rows),
+    # The trailing arg (e.g. "'..'", "'[]'") only shows up for a
+    # \left[...\right]/\begin{bmatrix} literal — compute-engine's own marker
+    # for which delimiter style was used, functionally irrelevant here since
+    # the matrix itself (rows) is identical either way. \begin{pmatrix}
+    # parses with no such marker at all, hence the default.
+    "Matrix": lambda rows, delimiter_style=None: sp.Matrix(rows),
     "Determinant": lambda m: m.det() if m.is_square else _raise(
         f"can't take the determinant of a {m.rows}x{m.cols} matrix — it isn't square"
     ),
     "Inverse": lambda m: m.inv(),
+    "Transpose": lambda m: m.T,
     "D": lambda expr, *wrt: sp.diff(expr, *wrt),
     "Integrate": _integrate,
     "Limit": _limit,
@@ -357,7 +642,20 @@ OPS = {
     "Limits": lambda var, lower, upper: (var, lower, upper),
     # Prime notation f'(x)/f''(x) parses as Apply(Derivative(f, n), x).
     "Derivative": lambda fn, order=1: (fn, order),
+    "InverseFunction": lambda fn: ("__inv__", fn),
     "Apply": _apply,
+    # A subscripted name (\mu_r, k_B, ...) whose subscript isn't a bare
+    # digit doesn't get flattened into a single symbol string by
+    # compute-engine's own parser the way "X_1" does (that case never
+    # reaches here at all) — a letter subscript instead arrives as this
+    # unevaluated ["Subscript", base, sub] node. Without this entry it fell
+    # through to the undefined-function branch below as an opaque
+    # Function('Subscript')(mu, r), which can't be solved/simplified/
+    # substituted like a real variable. Folding base+sub into one
+    # underscore-joined symbol name (sympy's own convention — its LaTeX
+    # printer already renders "mu_r" back as "\mu_{r}" with no extra work
+    # here) makes a subscripted name behave exactly like any other symbol.
+    "Subscript": lambda base, sub: sp.Symbol(f"{_subscript_part(base)}_{_subscript_part(sub)}"),
 }
 
 # Ops whose argument is an angle, for degree-mode conversion below.
@@ -382,7 +680,7 @@ _INVERSE_ANGLE_OPS = {"Arcsin", "Arccos", "Arctan", "Arccsc", "Arcsec", "Arccot"
 _BOUNDED_OPS = {"Integrate", "Sum", "Product"}
 
 
-def to_sympy(node, angle_mode="rad", engine_preference="sympy"):
+def to_sympy(node, angle_mode="rad", engine_preference="sympy", matrix_constants=None):
     if isinstance(node, bool):
         return sp.sympify(node)
     if isinstance(node, int):
@@ -403,6 +701,20 @@ def to_sympy(node, angle_mode="rad", engine_preference="sympy"):
         # fraction the plain-float branch above produces.
         return sp.Rational(str(node["num"]))
     if isinstance(node, str):
+        # A saved matrix workspace variable has to become a real sp.Matrix
+        # right here, at parse time — unlike a scalar workspace constant
+        # (substituted later, post-conversion, via compute.py's own
+        # subs_map/sympify_constant), an OPS entry like Determinant/Inverse
+        # calls sympy Matrix-only methods (.is_square, .det(), ...) the
+        # moment it runs during this same bottom-up conversion, and a bare
+        # Symbol standing in for the matrix doesn't have those. Add/Multiply
+        # have the same problem one level up (sp.Symbol + sp.Matrix raises
+        # outright, before any later .subs() ever gets a chance to run).
+        # matrix_constants is scoped to only matrix-shaped constants (see
+        # compute.py's _resolve) — every scalar constant still goes through
+        # the ordinary post-conversion substitution path unchanged.
+        if matrix_constants and node in matrix_constants:
+            return matrix_constants[node]
         return CONSTS.get(node, sp.Symbol(node))
     if isinstance(node, list):
         op, *args = node
@@ -416,19 +728,43 @@ def to_sympy(node, angle_mode="rad", engine_preference="sympy"):
             # message instead of becoming an opaque Function('Error')(...)
             # buried inside whatever expression wraps it.
             raise ValueError("couldn't understand part of this input")
+        if op == "List" and len(args) == 1 and isinstance(args[0], list) and args[0][:1] == ["Matrix"]:
+            # \left[\begin{matrix}...\end{matrix}\right] and \begin{bmatrix}
+            # ...\end{bmatrix} both parse as ["List", ["Matrix", rows, ...]]
+            # — the "List" here is compute-engine marking "this literal used
+            # square-bracket delimiters", not an actual list containing a
+            # matrix (\begin{pmatrix}...\end{pmatrix} parses as a bare
+            # ["Matrix", rows] with no such wrapper, and is unaffected by
+            # this). Left unhandled, the outer List made a bracket-delimited
+            # matrix literal indistinguishable from an actual list — routed
+            # into _resolve_system's system-of-equations solving in
+            # compute.py instead of being treated as a plain matrix value.
+            # Recursing straight into the inner Matrix node here means a
+            # bracket-style matrix behaves identically to a parens-style one
+            # from this point on.
+            return to_sympy(args[0], angle_mode, engine_preference, matrix_constants)
         if op in _BOUNDED_OPS and args and isinstance(args[-1], list) and args[-1][:1] == ["Tuple"]:
             args = [*args[:-1], ["Limits", *args[-1][1:]]]
-        converted = [to_sympy(a, angle_mode, engine_preference) for a in args]
+        converted = [to_sympy(a, angle_mode, engine_preference, matrix_constants) for a in args]
         if op in _ANGLE_OPS and angle_mode == "deg":
             converted[0] = converted[0] * sp.pi / 180
         if op in OPS:
-            # Integrate is the one op that needs engine_preference — passed
-            # as a keyword here rather than added to every OPS entry's
-            # calling convention, since nothing else reads it.
-            result = (
-                _integrate(*converted, engine_preference=engine_preference)
-                if op == "Integrate" else OPS[op](*converted)
-            )
+            # Integrate/Apply are the two ops that need an extra keyword
+            # (engine_preference, angle_mode respectively) — passed here
+            # rather than added to every OPS entry's calling convention,
+            # since nothing else reads either one. Apply needs angle_mode so
+            # its own elementary-inverse-trig branch (\cos^{-1}(0), etc.)
+            # can apply the same degree-mode conversion this loop applies to
+            # every *directly*-typed trig op below — otherwise that
+            # conversion never runs at all for an inverse reached through
+            # Apply, since this loop only ever sees the literal op string
+            # "Apply", never the resolved "Arccos"/etc. one level down.
+            if op == "Integrate":
+                result = _integrate(*converted, engine_preference=engine_preference)
+            elif op == "Apply":
+                result = _apply(*converted, angle_mode=angle_mode)
+            else:
+                result = OPS[op](*converted)
             if op in _INVERSE_ANGLE_OPS and angle_mode == "deg":
                 result = result * 180 / sp.pi
             return result
