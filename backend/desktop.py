@@ -30,6 +30,7 @@ automatic, Windows-only dependency of the `pywebview` package itself, so
 change needed there — the qtpy/PySide6 lines stay for Linux/Mac.
 """
 
+import multiprocessing
 import platform
 import sys
 import threading
@@ -168,4 +169,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Needed for the isolated sp.solve subprocess (solvers/algebraic.py) in
+    # a PyInstaller build; a no-op otherwise.
+    multiprocessing.freeze_support()
     main()

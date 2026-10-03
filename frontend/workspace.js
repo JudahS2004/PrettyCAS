@@ -5,14 +5,16 @@
 // not read from or written to localStorage, so it starts empty every
 // launch instead of carrying values over from a past session.
 
+import { convertLatexToMarkup } from "./node_modules/mathlive/mathlive.min.mjs";
+import { ce } from "./compute-engine.js";
+
 let vars = new Map();
 // name -> exact MathJSON tree for that variable's value, when the backend
 // could derive one (see compute.py's _exact_mathjson) — e.g. sqrt(2)/2, not
 // a decimal approximation of it. Absent for a name whose value has no exact
 // form (a genuine irrational-looking Float) or came from the evalNumeric
 // fallback rather than the backend. Kept as a second map, entirely separate
-// from `vars`, so the display path (render()/formatValue() below, both
-// still reading `vars` directly) never has to know this exists.
+// from `vars`. The panel shows it (varLatex) next to the rounded decimal.
 let varsExact = new Map();
 // name -> { params: [string, ...], mathjson: <body mathjson>, latex: <body latex, display-only> }
 let funcs = new Map();
@@ -87,14 +89,17 @@ export function mountWorkspace(detailsEl) {
 function render() {
   if (!listEl) return;
   if (vars.size === 0 && funcs.size === 0) {
-    listEl.innerHTML = `<p class="empty-note">Nothing yet — try "a = 3" or "f(x) = x^2".</p>`;
+    listEl.innerHTML = `<p class="empty-note">Nothing yet. Try "a = 3" or "f(x) = x^2".</p>`;
     return;
   }
   const varItems = [...vars.entries()].map(
-    ([name, value]) => itemMarkup(name, formatValue(value), "var", name, "variable")
+    ([name, value]) => itemMarkup(varLatex(name, value), "var", name, "variable", valueLatex(value))
   );
   const funcItems = [...funcs.entries()].map(
-    ([name, def]) => itemMarkup(`${name}(${def.params.join(", ")})`, def.latex, "func", name, "function")
+    ([name, def]) => itemMarkup(
+      `${symbolLatex(name)}(${def.params.map(symbolLatex).join(",")})=${def.latex}`,
+      "func", name, "function"
+    )
   );
   listEl.innerHTML = [...varItems, ...funcItems].join("");
 
@@ -107,43 +112,82 @@ function render() {
   });
 }
 
-function itemMarkup(label, value, kind, name, deleteTitle) {
+// data-name/data-value carry the plain name and value LaTeX for tests.
+function itemMarkup(latex, kind, name, deleteTitle, valueText = "") {
+  let body;
+  try {
+    body = convertLatexToMarkup(latex);
+  } catch {
+    body = escapeHtml(latex);
+  }
   return `
-    <div class="history-item workspace-item">
-      <div class="history-item-body">
-        <div class="history-in">${escapeHtml(label)}</div>
-        <div class="history-out">${escapeHtml(value)}</div>
-      </div>
+    <div class="history-item workspace-item" data-name="${escapeHtml(name)}" data-value="${escapeHtml(valueText)}">
+      <div class="history-item-body history-math">${body}</div>
       <button type="button" class="item-delete" data-name="${escapeHtml(name)}" data-kind="${kind}" title="Delete ${deleteTitle}" aria-label="Delete ${deleteTitle}">&times;</button>
     </div>`;
 }
 
-// Full double precision is kept in `vars` (so it stays as accurate as
-// possible when reused in later computations) — this is just a readable
-// display rounding for the panel, same idea as the plot page's slider value
-// display. A complex assignment ("X = 50 - 30i") caches app.js's compiled
-// {re, im} shape here rather than a plain number — see evalNumeric's own
-// comment in app.js — so this needs its own a+bi rendering instead of
-// assuming every stored value has a .toPrecision(). A matrix assignment
-// ("M = [[1,2],[3,4]]") caches compute.py's own {"numeric"} shape (see its
-// comment) — a plain nested array of rows, each cell itself either shape
-// above — so that has to be told apart from a complex {re, im} object
-// before reaching the object branch below, since Array.isArray is also
-// `typeof value === 'object'`. Rendered MATLAB-style ("[1 0;0 1]") rather
-// than as a bracketed/comma'd JS array literal — compact enough for the
-// workspace panel's single-line row, no rendering (MathLive, KaTeX, ...)
-// needed for it.
-function formatValue(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map((row) => row.map(formatValue).join(' ')).join(';')}]`;
+// "h_t" -> "h_{t}", "rho" -> "\\rho": compute-engine already knows how to
+// write its own symbol names as LaTeX.
+function symbolLatex(name) {
+  try {
+    return ce.box(name, { canonical: false }).latex || name;
+  } catch {
+    return name;
   }
-  if (value && typeof value === 'object') {
+}
+
+// Full double precision stays in `vars`; the panel just rounds to 10
+// significant digits. A complex value is app.js's {re, im} shape and a
+// matrix is a nested array of rows (see evalNumeric / compute.py's numeric).
+// "name = value". Shows the exact form too when there is one that isn't
+// just the same plain number, e.g. rho = sqrt(2)/2 ~ 0.7071067812.
+function varLatex(name, value) {
+  const decimal = valueLatex(value);
+  const exact = varsExact.get(name);
+  let exactLatex = null;
+  if (exact !== undefined && !isPlainNumber(exact)) {
+    try {
+      exactLatex = ce.box(exact, { canonical: false }).latex;
+    } catch {
+      exactLatex = null;
+    }
+  }
+  const lhs = symbolLatex(name);
+  if (exactLatex && exactLatex !== decimal) return `${lhs}=${exactLatex}\\approx ${decimal}`;
+  return `${lhs}=${decimal}`;
+}
+
+// True for an exact value that's already just a number, like 3, 2.5 or
+// 50 - 30i. Showing it next to its own decimal would repeat it.
+const PLAIN_NUMBER_HEADS = new Set(["Add", "Subtract", "Negate", "Multiply", "Complex"]);
+function isPlainNumber(json) {
+  if (typeof json === "number") return true;
+  if (typeof json === "string") return json === "ImaginaryUnit" || /^-?\d+(\.\d+)?$/.test(json);
+  if (json && typeof json === "object" && !Array.isArray(json) && "num" in json) return true;
+  if (Array.isArray(json)) return PLAIN_NUMBER_HEADS.has(json[0]) && json.slice(1).every(isPlainNumber);
+  return false;
+}
+
+function valueLatex(value) {
+  if (Array.isArray(value)) {
+    const rows = value.map((row) => row.map(valueLatex).join("&")).join("\\\\");
+    return `\\begin{bmatrix}${rows}\\end{bmatrix}`;
+  }
+  if (value && typeof value === "object") {
     const re = Number(value.re.toPrecision(10));
     const im = Number(value.im.toPrecision(10));
-    const sign = im < 0 ? '-' : '+';
-    return `${re} ${sign} ${Math.abs(im)}i`;
+    if (im === 0) return numberLatex(re);
+    const imPart = `${Math.abs(im) === 1 ? "" : numberLatex(Math.abs(im))}i`;
+    if (re === 0) return `${im < 0 ? "-" : ""}${imPart}`;
+    return `${numberLatex(re)}${im < 0 ? "-" : "+"}${imPart}`;
   }
-  return Number(value.toPrecision(10)).toString();
+  return numberLatex(Number(value.toPrecision(10)));
+}
+
+function numberLatex(n) {
+  const [mantissa, exponent] = n.toString().split("e");
+  return exponent === undefined ? mantissa : `${mantissa}\\times 10^{${Number(exponent)}}`;
 }
 
 function escapeHtml(str) {

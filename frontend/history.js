@@ -1,3 +1,5 @@
+import { convertLatexToMarkup } from "./node_modules/mathlive/mathlive.min.mjs";
+
 const STORAGE_KEY = "mathstuff2.history";
 const MAX_ENTRIES = 50;
 
@@ -22,8 +24,10 @@ function save() {
   }
 }
 
-export function addEntry(inputLatex, summary) {
-  entries = [{ inputLatex, summary, when: new Date().toLocaleTimeString() }, ...entries].slice(0, MAX_ENTRIES);
+// `resultLatex` is the rendered result, when there is one. `summary` is the
+// plain-text fallback (errors, and entries saved before resultLatex existed).
+export function addEntry(inputLatex, summary, resultLatex = null) {
+  entries = [{ inputLatex, summary, resultLatex, when: new Date().toLocaleTimeString() }, ...entries].slice(0, MAX_ENTRIES);
   save();
   render();
 }
@@ -64,8 +68,11 @@ function render() {
       (entry, i) => `
       <div class="history-item" data-index="${i}">
         <div class="history-item-body">
-          <div class="history-in">${escapeHtml(entry.inputLatex)}</div>
-          <div class="history-out">${escapeHtml(entry.summary)} · ${entry.when}</div>
+          <div class="history-in history-math">${mathMarkup(entry.inputLatex)}</div>
+          <div class="history-out">
+            ${entry.resultLatex ? `<span class="history-math">${mathMarkup(entry.resultLatex)}</span>` : escapeHtml(entry.summary)}
+            <span class="history-when">${entry.when}</span>
+          </div>
         </div>
         <button type="button" class="item-delete" data-index="${i}" title="Delete entry" aria-label="Delete entry">&times;</button>
       </div>`
@@ -84,6 +91,14 @@ function render() {
       if (entry && onReuse) onReuse(entry.inputLatex);
     });
   });
+}
+
+function mathMarkup(latex) {
+  try {
+    return convertLatexToMarkup(latex);
+  } catch {
+    return escapeHtml(latex);
+  }
 }
 
 function escapeHtml(str) {

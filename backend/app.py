@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 import sys
 
@@ -38,8 +39,10 @@ if getattr(sys, "frozen", False):
 else:
     FRONTEND_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 FRONTEND_FILES = {
-    "index.html", "shell.js", "compute-engine.js", "pages/app.js", "pages/plot.js", "pages/help.js",
-    "api.js", "settings.js", "history.js", "workspace.js", "theme/background-fx.js", "theme/theme-init.js", "styles.css",
+    "index.html", "shell.js", "compute-engine.js", "pages/app.js", "pages/plot.js",
+    "pages/help.js",
+    "api.js", "settings.js", "history.js", "workspace.js",
+    "theme.js", "theme-init.js", "background-fx.js", "styles.css",
 }
 
 
@@ -164,6 +167,9 @@ def export_route():
 
 
 if __name__ == "__main__":
+    # Needed for the isolated sp.solve subprocess (solvers/algebraic.py) in
+    # a PyInstaller build; a no-op otherwise.
+    multiprocessing.freeze_support()
     # threaded=True: without it, Werkzeug's dev server handles one request
     # at a time — a slow /api/compute (a gnarly integral sympy churns on for
     # a while) blocks every other request, including an unrelated, cheap one

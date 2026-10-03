@@ -93,6 +93,19 @@ def test_explicit_base_log_keeps_subscript_in_latex(resolve):
     assert response["result"] == "3"
 
 
+def test_log_base_2_evaluates_instead_of_staying_an_unevaluated_lb_call(resolve):
+    # \log_2(...) is the one log-subscript case compute-engine's restricted
+    # PARSE_CANONICAL parse (compute-engine.js) leaves as the raw "Lb"
+    # primitive rather than rewriting to ["Log", a, 2] the way every other
+    # base does (confirmed via a direct parse test) — mathjson.py had no
+    # OPS["Lb"] entry at all, so this fell through to the generic
+    # undefined-function fallback and printed as a bare, unevaluated
+    # \operatorname{Lb}(4) instead of computing anything.
+    response = resolve(["Lb", 4])
+    assert response["result"] == "2"
+    assert "Lb" not in response["latex"]
+
+
 def test_complex_evaluate_reports_re_im_numeric(resolve):
     response = resolve(["Add", ["Complex", 2, 3], ["Complex", 1, -1]])
     assert response["mode"] == "evaluate"

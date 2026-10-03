@@ -324,12 +324,26 @@ function boundVariableNames(node) {
   return [];
 }
 
+// compute-engine's built-in named constants (\pi -> "Pi", e -> "ExponentialE",
+// i -> "ImaginaryUnit") parse to their own bare symbol strings, same as any
+// workspace variable — mirrors backend/functions/mathjson.py's own
+// CONSTANTS table, which resolves these identically regardless of workspace
+// state. freeSymbolsOf (below) has to exclude these explicitly: they're
+// always resolvable, but never actually present as a key in getWorkspace()'s
+// constants object, so without this exclusion any assignment referencing one
+// (e.g. "omega = 2*pi*100") looked exactly like a reference to a genuinely
+// unresolved symbol and silently failed to save.
+const KNOWN_CONSTANT_SYMBOLS = new Set(['Pi', 'ExponentialE', 'ImaginaryUnit']);
+
 // The actual free symbol names in a raw MathJSON tree (as from a boxed
 // expression's own `.json`), correctly excluding whatever boundVariableNames
 // says a \int/\sum/\prod/\lim node binds within itself — see its own comment
 // on why this exists instead of just using compute-engine's `.unknowns`.
 function freeSymbolsOf(node, bound = new Set()) {
-  if (typeof node === 'string') return bound.has(node) ? new Set() : new Set([node]);
+  if (typeof node === 'string') {
+    if (bound.has(node) || KNOWN_CONSTANT_SYMBOLS.has(node)) return new Set();
+    return new Set([node]);
+  }
   if (!Array.isArray(node)) return new Set();
   const [, ...args] = node;
   const localBound = new Set([...bound, ...boundVariableNames(node)]);
@@ -441,6 +455,16 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+// LaTeX for the result as currently displayed, for the history panel. Null
+// when there's nothing to render (errors fall back to summarize's text).
+function resultLatex(response) {
+  if (response.mode === 'error') return null;
+  if (response.mode === 'check') return response.result ? '\\text{True}' : '\\text{False}';
+  const shown = withFormat(response, getSettings().numberFormat);
+  if (Array.isArray(shown.latexParts) && shown.latexParts.length > 1) return shown.latexParts.join(',\\quad ');
+  return shown.latex || null;
 }
 
 function summarize(response) {
@@ -571,7 +595,7 @@ async function runCompute(saveToHistory = false) {
     const response = { mode: 'error', result: 'Syntax error — check your input.' };
     lastResponse = response;
     render(response);
-    if (saveToHistory) addEntry(latex, summarize(response));
+    if (saveToHistory) addEntry(latex, summarize(response), resultLatex(response));
     return;
   }
 
@@ -596,7 +620,7 @@ async function runCompute(saveToHistory = false) {
     lastResponse = response;
     render(response);
     if (saveToHistory) {
-      addEntry(latex, summarize(response));
+      addEntry(latex, summarize(response), resultLatex(response));
       setFunction(funcDef.name, funcDef.params, funcDef.rhs.json, funcDef.rhs.latex);
     }
     return;
@@ -648,7 +672,7 @@ async function runCompute(saveToHistory = false) {
   lastResponse = response;
   render(response);
   if (saveToHistory) {
-    addEntry(mf.getValue('latex'), summarize(response));
+    addEntry(mf.getValue('latex'), summarize(response), resultLatex(response));
     if (isRealAssignment && response.mode !== 'error') {
       // Prefer the backend's own full-double-precision numeric value
       // (response.numeric — see compute.py's _numeric_value) over a local

@@ -326,7 +326,7 @@ def has_unresolved_integral(expr):
     return any(i not in covered for i in expr.atoms(sp.Integral))
 
 
-def _resolve_definite_integral(body, var, lower, upper):
+def _resolve_definite_integral(body, var, lower, upper, try_symbolic=True):
     """Tries sp.integrate, then Maxima's exact definite-integral routine,
     then mpmath numeric quadrature, in that order — factored out of
     _integrate so retry_unresolved_integrals (below) can reuse the exact
@@ -338,7 +338,25 @@ def _resolve_definite_integral(body, var, lower, upper):
     longer than that to conclude "no closed form" by itself, and neither
     fallback below needs sympy to have actually finished trying in order to
     kick in.
+
+    try_symbolic=False skips straight to the numeric-quadrature fallback,
+    bypassing both sp.integrate's timeout and the Maxima attempt entirely —
+    retry_unresolved_integrals (the only caller that passes this) is only
+    ever re-running an integral that already failed this exact symbolic
+    chain once already, just with a workspace function's own parameter still
+    free instead of the concrete number it has now; retrying the identical
+    symbolic search a second time for a different constant almost never
+    turns "no closed form" into "closed form" (this is still the same
+    functional shape, e.g. Craig's formula for the Gaussian tail — no amount
+    of retrying finds an elementary antiderivative for a different x), so
+    it's pure wasted latency (confirmed live: dropped a Q(3)-style
+    workspace-function-integral call from ~5s to well under 1s) for a case
+    the numeric quadrature below closes reliably anyway.
     """
+    if not try_symbolic:
+        numeric = _numeric_definite_integral(body, var, lower, upper)
+        return numeric if numeric is not None else sp.Integral(body, (var, lower, upper))
+
     result = _run_with_timeout(
         sp.integrate, body, (var, lower, upper),
         on_timeout=sp.Integral(body, (var, lower, upper)),
@@ -416,7 +434,7 @@ def retry_unresolved_integrals(expr):
             continue  # an indefinite integral has no numeric value to fall back to
         var, lower, upper = limits
         try:
-            value = _resolve_definite_integral(integral.function, var, lower, upper)
+            value = _resolve_definite_integral(integral.function, var, lower, upper, try_symbolic=False)
         except Exception:
             continue
         if not (hasattr(value, "has") and value.has(sp.Integral)):
@@ -593,6 +611,20 @@ OPS = {
     "Arsinh": sp.asinh, "Arcosh": sp.acosh, "Artanh": sp.atanh,
     "Arcsch": sp.acsch, "Arsech": sp.asech, "Arcoth": sp.acoth,
     "Ln": sp.log, "Log": lambda a, b=10: sp.log(a, b),
+    # "Lb" (log base 2) is its own MathJSON primitive, distinct from "Log"
+    # with an explicit base — compute-engine's \log_2(...) subscript parse
+    # rule emits this raw canonical form directly rather than routing
+    # through "Log" the way \log_3(...), \log_5(...), etc. do (confirmed
+    # live via a direct parse test: \log_2(4) -> ["Lb", 4], every other
+    # base -> ["Log", 4, base]), and PARSE_CANONICAL's restricted
+    # canonicalization pass list (see compute-engine.js) doesn't include
+    # whichever pass would otherwise rewrite it to "Log" form. Without this
+    # entry it fell through to the generic undefined-function fallback,
+    # printing as a bare, unevaluated \operatorname{Lb}(4). sp.log(a, 2) is
+    # the exact same log(a)/log(2) shape OPS["Log"](a, 2) already produces,
+    # so the existing _LogBase latex printer (compute.py) already renders
+    # this correctly as \log_2(...) with no further changes needed.
+    "Lb": lambda a: sp.log(a, 2),
     "Exp": sp.exp, "Abs": sp.Abs,
     # Wired to sympy's real implementations (not left to the undefined-function
     # fallback below) specifically so summation/product recognize them and can

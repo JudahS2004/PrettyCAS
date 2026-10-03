@@ -8,3 +8,10 @@ dist/
 eqnbuilder2/
 cas-engine-comparison.md
 CLAUDE.md
+deprecated/
+.pytest_cache/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

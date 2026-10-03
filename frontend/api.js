@@ -37,6 +37,7 @@ export async function computeMathJson(mathjson, settings, extra = {}, signal) {
     number_format: settings.numberFormat,
     complex_form: settings.complexForm,
     engine_preference: settings.enginePreference,
+    prefer_algebraic: settings.preferAlgebraic,
     ...extra,
   }, signal);
 }

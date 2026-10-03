@@ -1,267 +1,97 @@
+/* PrettyCAS's one stylesheet. Colors come from theme-init.js: --bg,
+   --accent, --accent-secondary, --accent-text, --panel-alpha, --overlay-alpha and --math-scale
+   are set inline on <html>, and data-tone="light"|"dark" (from the
+   background's brightness) picks the panel/text palette below. */
+
 :root {
-  --bg: #eef0f6;
-  --panel-bg: #ffffff;
-  /* How opaque the input/output/history/workspace "bubbles" are — set from
-     the settings panel's Panel transparency slider. 100% = current solid
-     look; anything lower lets the animated background show through them. */
-  --panel-alpha: 100%;
-  /* Backdrop blur behind a translucent panel, from the Panel blur slider.
-     Only visible once --panel-alpha is below 100%. Set to the literal
-     keyword "none" (not blur(0px)) when the slider is at 0 — see
-     settings.js/theme-init.js for why. */
-  --panel-backdrop: blur(10px);
-  --panel-backdrop-topbar: saturate(180%) blur(10px);
-  --border: #e1e3ec;
-  --border-strong: #c9cce0;
-  --text: #1b1d29;
-  --text-dim: #6b6f80;
-  --text-faint: #9598a8;
-
-  /* Accent is an HSL triple so theme swatches only need to override the
-     three components below; --accent/--accent-hover/--accent-soft derive
-     from them and automatically stay correct against light or dark panels. */
-  --accent-h: 243;
-  --accent-s: 100%;
-  --accent-l: 66%;
-  --accent: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
-  --accent-hover: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 9%));
-  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--panel-bg));
+  --bg: #f2f3f5;
+  --accent: #2563eb;
   --accent-text: #ffffff;
+  --accent-secondary: #6d28d9;
+  --panel-alpha: 100%;
+  --overlay-alpha: 100%;
 
-  /* A muted, analogous partner to --accent — same derive-from-h/s/l trick,
-     shifted round the wheel and pulled toward lower saturation/higher
-     lightness so it reads as a quiet second tone rather than a competing
-     accent. Used sparingly: the PrettyCAS wordmark's gradient, not general UI. */
-  --accent-secondary-h: calc(var(--accent-h) + 40);
-  --accent-secondary-s: calc(var(--accent-s) * 0.5);
-  --accent-secondary-l: calc(var(--accent-l) + 10%);
-  --accent-secondary: hsl(var(--accent-secondary-h) var(--accent-secondary-s) var(--accent-secondary-l));
+  /* Panels, inputs and borders are tinted from --bg so cards sit in the
+     background color instead of floating on top of it as plain white/grey. */
+  --panel-bg: color-mix(in srgb, var(--bg) 45%, #ffffff);
+  --input-bg: color-mix(in srgb, var(--bg) 25%, #ffffff);
+  --border: color-mix(in srgb, var(--bg) 82%, #000000);
+  --border-strong: color-mix(in srgb, var(--bg) 70%, #000000);
+  --text: #1c1d21;
+  --text-dim: #5d606b;
+  --text-faint: #8a8d97;
+  --error: #c8382e;
+  --success: #1a8a5f;
 
-  --error: #d1453b;
-  --error-soft: #fdecea;
-  --success: #1a9c6e;
-  --success-soft: #e8f8f1;
-  --shadow-sm: 0 1px 2px rgba(20, 22, 40, 0.04), 0 1px 1px rgba(20, 22, 40, 0.03);
-  --shadow-md: 0 8px 24px rgba(24, 26, 46, 0.08), 0 2px 6px rgba(24, 26, 46, 0.04);
-  --shadow-lg: 0 20px 45px rgba(24, 26, 46, 0.14);
-  --radius: 14px;
-  --radius-sm: 8px;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
+  --accent-secondary-soft: color-mix(in srgb, var(--accent-secondary) 14%, var(--panel-bg));
+  --error-soft: color-mix(in srgb, var(--error) 12%, var(--panel-bg));
+  --success-soft: color-mix(in srgb, var(--success) 12%, var(--panel-bg));
+  --hover: color-mix(in srgb, var(--text) 6%, transparent);
+
+  /* Normal panels take the full Opacity setting. Floating surfaces (menus,
+     popovers, the settings dialog) use --overlay-alpha, which never drops
+     below 92%, so text on them stays readable. */
+  --panel: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
+  --overlay: color-mix(in srgb, var(--panel-bg) var(--overlay-alpha), transparent);
+
+  --radius: 6px;
+  --shadow-overlay: 0 6px 20px rgba(0, 0, 0, 0.14);
+
   --mono: "SFMono-Regular", ui-monospace, Consolas, Menlo, monospace;
-  /* Inter is the app-wide UI font — plain, functional, "calculator" rather
-     than "LaTeX document." Self-hosted via @font-face below (same as
-     CMU Serif) rather than relying on it being installed system-wide.
-     System-UI fallbacks first in case the webfont is still loading. */
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  /* CMU Serif (Computer Modern — the classic LaTeX text face) is used
-     sparingly, not app-wide: the "PrettyCAS" title and the Help page (see
-     #app-title / main[data-view="help"] below), where a LaTeX-document
-     feel actually fits — everywhere else stays --sans for a plainer,
-     calculator-like UI. Self-hosted via @font-face rather than relying on
-     it being installed system-wide (it usually isn't). Deliberately NOT
-     applied to MathLive's own math rendering — that uses its own bundled
-     math font (already Computer-Modern-derived, with the glyph coverage
-     and spacing metrics a plain text face like this one doesn't have), so
-     the two still look visually consistent without swapping MathLive's
-     internals. Generic serif fallback for the brief window before the
-     webfont loads, or if it somehow fails to. */
+  /* CMU Serif only for the title and the Help page. MathLive keeps its own
+     bundled math font. */
   --serif: "CMU Serif", "Latin Modern Roman", Georgia, "Times New Roman", serif;
+
+  color-scheme: light;
 }
 
-@font-face {
-  font-family: "Inter";
-  src: url("./fonts/Inter-Regular.otf") format("opentype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Inter";
-  src: url("./fonts/Inter-Bold.otf") format("opentype");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Inter";
-  src: url("./fonts/Inter-Italic.otf") format("opentype");
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Inter";
-  src: url("./fonts/Inter-BoldItalic.otf") format("opentype");
-  font-weight: 700;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: "CMU Serif";
-  src: url("./fonts/CMUSerif-Roman.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "CMU Serif";
-  src: url("./fonts/CMUSerif-Bold.ttf") format("truetype");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "CMU Serif";
-  src: url("./fonts/CMUSerif-Italic.ttf") format("truetype");
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: "CMU Serif";
-  src: url("./fonts/CMUSerif-BoldItalic.ttf") format("truetype");
-  font-weight: 700;
-  font-style: italic;
-  font-display: swap;
+:root[data-tone="dark"] {
+  --panel-bg: color-mix(in srgb, var(--bg) 88%, #ffffff);
+  --input-bg: color-mix(in srgb, var(--bg) 94%, #ffffff);
+  --border: color-mix(in srgb, var(--bg) 78%, #ffffff);
+  --border-strong: color-mix(in srgb, var(--bg) 68%, #ffffff);
+  --text: #e8e9ed;
+  --text-dim: #a4a7b2;
+  --text-faint: #767984;
+  --error: #ec6a60;
+  --success: #3fbf8a;
+  --shadow-overlay: 0 6px 20px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
 }
 
-/* Accent themes: pick from the settings panel's color swatches. Full 100%
-   saturation on every chromatic one so each reads as a hard, pure hue
-   (blue ~#006aff, red pure #ff0000, purple ~#8400ff, green ~#00cc4b,
-   orange ~#ff7700) instead of a muted/pastel tint. */
-[data-accent="blue"]   { --accent-h: 215; --accent-s: 100%; --accent-l: 50%; }
-[data-accent="red"]    { --accent-h: 0;   --accent-s: 100%; --accent-l: 50%; }
-[data-accent="purple"] { --accent-h: 271; --accent-s: 100%; --accent-l: 50%; }
-[data-accent="green"]  { --accent-h: 142; --accent-s: 100%; --accent-l: 40%; }
-[data-accent="orange"] { --accent-h: 28;  --accent-s: 100%; --accent-l: 50%; }
-[data-accent="black"]  { --accent-h: 0; --accent-s: 0%; --accent-l: 8%; }
-
-/* Arbitrary accent picked via the settings panel's color input.
-   --accent-hover is overridden explicitly since (unlike --accent-soft) it
-   doesn't derive from --accent, so it wouldn't otherwise pick up a custom
-   color. --accent-custom gets a fallback so nothing is invalid before
-   settings.js's first applyTheme() call sets the real value. */
-[data-accent="custom"] {
-  --accent: var(--accent-custom, #4f5bff);
-  --accent-hover: color-mix(in srgb, var(--accent-custom, #4f5bff) 85%, black);
-  /* No h/s/l breakdown exists for an arbitrary hex, so --accent-secondary's
-     usual hue-shift formula can't apply here — a straight tint toward white
-     stands in instead. */
-  --accent-secondary: color-mix(in srgb, var(--accent-custom, #4f5bff) 60%, white 40%);
-}
-
-/* An explicit secondary-accent color picked in Settings wins over both of
-   the derivations above (auto-formula or custom-accent tint). Scored on
-   :root plus an attribute, so it outranks the single-attribute selectors
-   above regardless of source order — no !important needed. */
-:root[data-accent-secondary="custom"] {
-  --accent-secondary: var(--accent-secondary-custom, #8a5bff);
-}
-
-/* The six fixed secondary-accent presets — same override precedence as
-   "custom" above, just a literal color instead of the picker's variable.
-   Each sits at the color-wheel hue halfway between two adjacent primary
-   accents (blue-red-purple-green-orange-black, wrapping around), so the
-   secondary list reads as "one step off" from whichever primary you pick.
-   Black has no hue of its own, so its two neighboring gaps (orange-black,
-   black-blue) use a desaturated, darkened version of the chromatic side
-   instead of an actual hue midpoint. */
-:root[data-accent-secondary="orchid"] { --accent-secondary: hsl(290 55% 64%); } /* between blue and red */
-:root[data-accent-secondary="rose"]   { --accent-secondary: hsl(318 55% 66%); } /* between red and purple */
-:root[data-accent-secondary="cyan"]   { --accent-secondary: hsl(207 50% 58%); } /* between purple and green */
-:root[data-accent-secondary="olive"]  { --accent-secondary: hsl(85  45% 46%); } /* between green and orange */
-:root[data-accent-secondary="bronze"] { --accent-secondary: hsl(28  32% 32%); } /* between orange and black */
-:root[data-accent-secondary="slate"]  { --accent-secondary: hsl(215 28% 30%); } /* between black and blue */
-
-/* There's no separate light/dark "theme" setting — only a background color
-   (system-default or custom). When no custom background is picked, the
-   default one follows the OS preference automatically. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-custom-bg="true"]) {
-    --bg: #14151f;
-  }
-}
-
-/* Arbitrary background picked via the settings panel's color input wins
-   over the OS-preference default above (same :root+attribute specificity,
-   so source order decides). */
-:root[data-custom-bg="true"] {
-  --bg: var(--bg-custom, #eef0f6);
-}
-
-/* Panel/text/border/shadow tokens don't follow their own light/dark
-   choice — they follow whatever background actually ended up in effect
-   above. data-bg-tone is computed from that background's own luminance
-   (see theme-init.js / settings.js), so e.g. a dark custom background gets
-   light-on-dark panels regardless of the OS setting, and a light custom
-   background gets dark-on-light panels even when the OS is set to dark. */
-:root[data-bg-tone="dark"] {
-  --panel-bg: #1c1d2b;
-  --border: #2c2d3d;
-  --border-strong: #3a3b4e;
-  --text: #eceef5;
-  --text-dim: #a3a6ba;
-  --text-faint: #767a90;
-  --error-soft: rgba(209, 69, 59, 0.18);
-  --success-soft: rgba(26, 156, 110, 0.18);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 20px 45px rgba(0, 0, 0, 0.55);
-}
-
-/* Lets MathLive's own internal (shadow-DOM) styling follow the resolved
-   background tone too, not just the OS setting, since color-scheme on an
-   ancestor affects how descendant shadow trees resolve that media feature. */
-:root { color-scheme: light dark; }
-:root[data-bg-tone="light"] { color-scheme: light; }
-:root[data-bg-tone="dark"] { color-scheme: dark; }
-
-/* Settings panel's "Square corners" toggle: sharpens every element built
-   from --radius/--radius-sm (inputs, buttons, the input/output/history/
-   workspace panels, ...) to 0px, plus the page-nav and 2D/3D pill toggles
-   explicitly below (they're built from a fixed 999px, not --radius).
-   Deliberately leaves the small round shapes alone — badges/chips, color
-   swatches, circular icon buttons — those read as tags/dots rather than
-   boxes and stay round regardless of the box-corner theme. */
-:root[data-corners="square"] {
-  --radius: 0px;
-  --radius-sm: 0px;
-}
-
-/* The top nav (Compute/Plot/Help) and the Plot page's 2D/3D switch are
-   pill-shaped (999px) rather than built from --radius, so the toggle above
-   doesn't reach them on its own — square them explicitly too. */
-:root[data-corners="square"] nav.pages,
-:root[data-corners="square"] nav.pages a,
-:root[data-corners="square"] .mode-toggle,
-:root[data-corners="square"] .mode-btn {
-  border-radius: 0;
-}
+@font-face { font-family: "Inter"; src: url("./fonts/Inter-Regular.otf") format("opentype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("./fonts/Inter-Bold.otf") format("opentype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("./fonts/Inter-Italic.otf") format("opentype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("./fonts/Inter-BoldItalic.otf") format("opentype"); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: "CMU Serif"; src: url("./fonts/CMUSerif-Roman.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "CMU Serif"; src: url("./fonts/CMUSerif-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "CMU Serif"; src: url("./fonts/CMUSerif-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "CMU Serif"; src: url("./fonts/CMUSerif-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; font-display: swap; }
 
 * { box-sizing: border-box; }
 
-/* Browsers (Firefox especially) draw their own default focus ring — a
-   dotted outline — on plain buttons, links, and other controls that don't
-   set their own focus style. Text inputs/selects/the math field already
-   replace that with an accent box-shadow ring (see their own :focus rules
-   below, which win on specificity and so still apply over this). This
-   catch-all just gives everything else — buttons, swatches, tabs, radio/
-   checkbox labels — that same solid accent ring instead of the dotted
-   default, so focus indication looks like one consistent system. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* The page background lives on html, not body: html's background is always
-   unambiguously what paints the actual document canvas, at the very back
-   of the stack. Putting it on body instead is ambiguous — browsers may
-   propagate a body background up to paint the canvas too, which would then
-   sit in front of (not behind) a position:fixed, negative-z-index child of
-   body like the effects layer below, hiding it entirely. */
 html {
   background: var(--bg);
-  transition: background-color 0.15s ease;
+  /* Zoom setting (settings.js) scales the whole rem-based UI. */
+  font-size: calc(16px * var(--ui-zoom, 1));
 }
+
+/* background-fx.js draws the selected effect here, behind everything. */
+.bg-fx-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.55;
+}
+:root[data-bg-fx="none"] .bg-fx-canvas { display: none; }
 
 body {
   margin: 0;
@@ -269,32 +99,35 @@ body {
   color: var(--text);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
-  transition: color 0.15s ease;
 }
 
-/* The Help page reads as documentation/prose, not app chrome — CMU Serif
-   fits there the same way it fits the title (see header.topbar h1).
-   code/pre inside it still override to --mono where that's already set,
-   since inheritance always loses to any explicit rule on the descendant. */
-main[data-view="help"] {
-  font-family: var(--serif);
+button { font-family: inherit; }
+
+main[data-view="help"] { font-family: var(--serif); }
+
+/* Shared look for every small text input/select. */
+input[type="number"],
+select {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+  font-family: inherit;
+  background: var(--input-bg);
+  color: var(--text);
 }
 
-/* ---------- Background effects ---------- */
-
-.bg-fx-canvas {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
+input[type="number"]:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
-/* .bg-fx-canvas is shared by every canvas-drawn effect (matrix/grid/
-   spiral/orbs). background-fx.js picks which one draws to it, so this only
-   needs to hide it for the non-canvas "none" state. */
-:root[data-bg-fx="none"] .bg-fx-canvas { display: none; }
-
-.bg-fx-canvas { opacity: 0.55; }
+input[type="range"],
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
 
 /* ---------- Topbar ---------- */
 
@@ -302,9 +135,8 @@ header.topbar {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.9rem 1.5rem;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop-topbar);
+  padding: 0.7rem 1.25rem;
+  background: var(--panel);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
@@ -315,23 +147,17 @@ header.topbar h1 {
   font-family: var(--serif);
   font-size: 1.15rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
-  margin: 0;
-  margin-right: auto;
-  padding: 0.2rem 0;
+  margin: 0 auto 0 0;
+  color: var(--accent);
   background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
   -webkit-background-clip: text;
   background-clip: text;
-  color: transparent;
+  -webkit-text-fill-color: transparent;
   cursor: pointer;
   user-select: none;
-  opacity: 1;
-  transition: opacity 0.15s ease;
 }
 
-header.topbar h1:hover { opacity: 0.8; }
-
-/* A small dot marks debug mode as on — the title doubles as its toggle. */
+/* A small dot marks debug mode as on; the title doubles as its toggle. */
 header.topbar h1.is-debug::after {
   content: "";
   display: inline-block;
@@ -339,304 +165,249 @@ header.topbar h1.is-debug::after {
   height: 6px;
   margin-left: 0.4rem;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-secondary);
   vertical-align: middle;
 }
 
 nav.pages {
   display: flex;
   gap: 0.25rem;
-  background: var(--bg);
-  padding: 0.25rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
 }
 
 nav.pages a {
-  padding: 0.4rem 0.9rem;
-  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius);
   text-decoration: none;
   color: var(--text-dim);
   font-size: 0.88rem;
   font-weight: 500;
-  transition: background 0.15s ease, color 0.15s ease;
 }
 
-nav.pages a:hover:not([aria-current="page"]) {
-  color: var(--text);
-}
+nav.pages a:hover:not([aria-current="page"]) { background: var(--hover); color: var(--text); }
 
 nav.pages a[aria-current="page"] {
   background: var(--accent);
   color: var(--accent-text);
-  box-shadow: var(--shadow-sm);
 }
 
 button.icon-button {
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border-radius: var(--radius-sm);
-  width: 2.35rem;
-  height: 2.35rem;
-  font-size: 1.15rem;
-  cursor: pointer;
+  background: transparent;
+  border-radius: var(--radius);
+  width: 2.25rem;
+  height: 2.25rem;
+  font-size: 1.1rem;
   line-height: 1;
   color: var(--text-dim);
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
 }
 
-button.icon-button:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
+button.icon-button:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+/* ---------- Floating menus (hamburger, export, graph settings, popovers) ---------- */
+
+.misc-menu,
+.export-menu,
+.graph-settings-panel,
+.expr-settings-popover {
+  position: absolute;
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
 }
+
+.misc-menu[hidden],
+.export-menu[hidden],
+.graph-settings-panel[hidden],
+.expr-settings-popover[hidden] { display: none; }
 
 .menu-wrap { position: relative; }
 
 .misc-menu {
-  position: absolute;
-  top: 2.7rem;
-  right: 0;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
-  padding: 0.35rem;
+  top: calc(100% + 0.35rem);
+  left: 0;
   z-index: 15;
-  min-width: 140px;
+  min-width: 150px;
+  padding: 0.3rem;
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
 }
 
-.misc-menu[hidden] { display: none; }
-
-.misc-menu a {
-  padding: 0.5rem 0.7rem;
-  border-radius: var(--radius-sm);
+.misc-menu a,
+.export-menu button {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  text-align: left;
   text-decoration: none;
-  color: var(--text-dim);
+  color: var(--text);
   font-size: 0.88rem;
-  font-weight: 500;
-  transition: background 0.15s ease, color 0.15s ease;
+  cursor: pointer;
 }
 
-.misc-menu a:hover { color: var(--text); background: var(--bg); }
-.misc-menu a[aria-current="page"] { background: var(--accent); color: var(--accent-text); }
+.misc-menu a:hover,
+.export-menu button:hover { background: var(--hover); }
+
+.misc-menu-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.misc-menu-check:hover { background: var(--hover); }
+
+.misc-menu-divider,
+.export-menu-divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--border);
+}
 
 /* ---------- Layout ---------- */
 
 main {
   max-width: 1040px;
   margin: 0 auto;
-  padding: 2rem 1.25rem 3rem;
+  padding: 1.75rem 1.25rem 3rem;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
 }
 
-/* shell.js hides the three inactive <main data-view> landmarks via the
-   `hidden` attribute. Every other display rule for `main` here (including
-   `main.plot-layout` below) is an author-stylesheet rule, and CSS resolves
-   cascade origin (user-agent vs. author) before specificity — so the
-   browser's own built-in `[hidden] { display: none }` rule, despite being
-   an attribute selector, always LOSES to any of these plain `main { display:
-   ... }` author rules, no matter how much lower their specificity looks on
-   paper. (Confirmed live: Help/Misc's `<main>` kept `display: flex` with
-   `hidden` correctly set as an attribute — a real, easy-to-miss gotcha, not
-   a hypothetical.) `!important` is what it actually takes for an author
-   rule to beat the UA stylesheet outright. */
-main[hidden] {
-  display: none !important;
-}
+/* The UA's [hidden] rule loses to the author `main { display }` rules above
+   (origin beats specificity), so the inactive views need !important. */
+main[hidden] { display: none !important; }
 
-.panel {
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
+.panel,
+.panel-stack,
+.expr-panel,
+.plot-panel {
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.25rem;
-  box-shadow: var(--shadow-sm);
 }
+
+.panel { padding: 1.25rem; }
+
+/* Related sections (input/output/workspace/history, Help) as one card
+   with divider lines between them. */
+.panel-stack { overflow: hidden; }
+.panel-stack > .panel-section { padding: 1.25rem; }
+.panel-stack > .panel-section + .panel-section { border-top: 1px solid var(--border); }
+
+/* help.js renders into #help-sections; display: contents keeps the
+   divider rules above applying to its children. */
+#help-sections { display: contents; }
+.help-section { border-top: 1px solid var(--border); }
+
+h2 { font-size: 1rem; font-weight: 700; }
 
 /* ---------- Math input ---------- */
 
-/* MathLive only wires up mouse-driven caret placement/selection
-   (connectedCallback in mathlive.mjs) when getComputedStyle(host).userSelect
-   isn't "none" at the moment the element is upgraded — otherwise it skips
-   attaching its pointerdown handler entirely, permanently, with no re-check
-   later. Left unset, that resolves from whatever default the host's engine
-   hands back before our stylesheet has necessarily applied (this project
-   already hit one other case of pywebview's Qt/QtWebEngine backend
-   measuring the field before layout/styles have settled — see the
-   menu-toggle comment on #mf::part below). Setting it explicitly removes
-   that race instead of relying on an engine's default resolving to
-   anything other than "none".  */
+/* user-select must be explicit: MathLive only attaches mouse caret/selection
+   handling if the host's computed user-select isn't "none" at upgrade time. */
 math-field {
   font-size: calc(1.5rem * var(--math-scale, 1));
   width: 100%;
   display: block;
-  border: 1.5px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 0.85rem 1rem;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.8rem 1rem;
+  background: var(--input-bg);
   user-select: text;
 }
 
-/* MathLive decides whether to show its own menu-toggle button by measuring
-   the field's width at some internal setup/focus event, and — at least
-   under the pywebview desktop window's particular startup sequence (a
-   GApplication + idle-queued window realization, unlike a plain browser
-   tab) — that measurement can land before layout has settled, permanently
-   inline-styling the button to display:none with nothing ever re-running
-   the check to correct it (confirmed: focusing/resizing afterward doesn't
-   fix it either). Rather than chase that exact timing race, just override
-   the outcome directly: the field is always wide enough here in practice,
-   so force the toggle visible regardless of what MathLive measured.
-   #mf specifically — plot.js's expression-row fields deliberately hide
-   this same part just below, and !important is what it takes to beat an
-   inline style set by the shadow tree's own JS. */
-#mf::part(menu-toggle) {
-  display: flex !important;
-}
+/* MathLive can measure the field before layout settles in the desktop
+   build and permanently hide its menu toggle; force it visible. */
+#mf::part(menu-toggle) { display: flex !important; }
 
 math-field:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-soft);
   outline: none;
 }
 
 .row {
   display: flex;
-  gap: 0.6rem;
+  gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
 }
 
-.quick-toggles { margin-top: 0.75rem; gap: 0.5rem; }
+.quick-toggles { margin-top: 0.75rem; }
 .quick-toggles #clear-input { margin-left: auto; }
 
-/* A single button per setting that states its current value and cycles to
-   the next one on click, instead of a segmented control showing every
-   option at once — stays compact no matter how many values a setting has. */
-.cycle-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+/* One button per setting that shows its current value and cycles on click. */
+.cycle-toggle,
+button.secondary,
+.expr-color-popover-toggle {
   border: 1px solid var(--border-strong);
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
-  padding: 0.35rem 0.75rem 0.35rem 0.9rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 600;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.cycle-toggle::after {
-  content: "⇄";
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--text-faint);
-}
+.cycle-toggle:hover,
+.expr-color-popover-toggle:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 
-.cycle-toggle:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.cycle-toggle:hover::after { color: var(--accent); }
-
-button {
-  font-family: inherit;
-}
+/* Secondary buttons and small utility actions take the secondary accent. */
+button.secondary:hover { background: var(--accent-secondary-soft); color: var(--accent-secondary); border-color: var(--accent-secondary); }
 
 button.primary {
   background: var(--accent);
   color: var(--accent-text);
   border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.65rem 1.3rem;
-  font-size: 0.95rem;
+  border-radius: var(--radius);
+  padding: 0.6rem 1.2rem;
+  font-size: 0.92rem;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
 }
 
-button.primary:hover { background: var(--accent-hover); box-shadow: var(--shadow-md); }
-button.primary:active { transform: translateY(1px); }
+button.primary:hover { filter: brightness(0.92); }
 
-button.secondary {
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 0.6rem 1rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-  color: var(--text-dim);
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-/* Hovers into --accent-secondary rather than --accent: it's the
-   "secondary" button, so it takes the app's secondary accent color. */
-button.secondary:hover {
-  background: color-mix(in srgb, var(--accent-secondary) 14%, var(--panel-bg));
-  border-color: var(--accent-secondary);
-  color: var(--accent-secondary);
-}
-
-/* Subtle "just say Copy" buttons — a ghost link rather than a bordered
-   button, so they read as a small utility action, not a primary control. */
-.copy-btn {
+/* Small text-only utility buttons (Copy, Clear, Reset). */
+.copy-btn,
+.link-btn {
   background: none;
   border: none;
-  color: var(--text-faint);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 0.3rem 0.55rem;
-  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
   flex-shrink: 0;
 }
 
-.copy-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.copy-btn:hover,
+.link-btn:hover { background: var(--accent-secondary-soft); color: var(--accent-secondary); }
 
 /* ---------- Output ---------- */
 
-.output-panel {
-  transition: border-color 0.15s ease;
-  min-height: 5rem;
-}
-
-.output-panel[data-mode="error"] {
-  border-color: var(--error);
-  background: var(--error-soft);
-}
-
+.output-panel { min-height: 5rem; }
+.output-panel[data-mode="error"] { background: var(--error-soft); }
 .output-panel[data-mode="pending"] { opacity: 0.7; }
 
-.output-panel-title {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-  font-weight: 700;
-}
+.output-panel-title { margin: 0 0 0.75rem; }
 
 .output-panel-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.6rem;
-  margin-bottom: 0.7rem;
+  margin-bottom: 0.6rem;
 }
 
 .output-panel .badges {
@@ -646,34 +417,23 @@ button.secondary:hover {
 }
 
 .badge {
-  font-family: var(--sans);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius);
   background: var(--accent-soft);
-  border: 1px solid transparent;
-  color: var(--accent);
+  color: var(--text);
 }
 
 .output-panel[data-mode="error"] .badge {
   color: var(--error);
-  background: color-mix(in srgb, var(--error) 18%, var(--panel-bg));
+  background: transparent;
+  border: 1px solid var(--error);
 }
 
-/* mathlive-static.css's own .ML__latex rule (the wrapper convertLatexToMarkup
-   wraps every result in) hardcodes user-select: none — reasonable for a
-   mathfield that manages its own selection highlighting, but this output is
-   plain static markup with no such mechanism, so that rule just blocks the
-   browser's native text selection with nothing to replace it. Overriding it
-   here (two classes beats their one, so this wins regardless of link order)
-   lets results be click-dragged and copied like any other text; user-select
-   inherits down to the glyph spans inside so no deeper override is needed. */
-.output-render .ML__latex {
-  user-select: text;
-}
+/* mathlive-static.css sets user-select: none on .ML__latex; results are
+   static markup, so let them be selected and copied. */
+.output-render .ML__latex { user-select: text; }
 
 .output-render {
   font-size: calc(1.45rem * var(--math-scale, 1));
@@ -681,7 +441,6 @@ button.secondary:hover {
   overflow-y: hidden;
   padding: 0.5rem 0.25rem;
   line-height: 1.6;
-  color: var(--text);
 }
 
 .result-lines {
@@ -690,14 +449,8 @@ button.secondary:hover {
   gap: 0.9rem;
 }
 
-/* overflow-y: hidden alongside overflow-x is deliberate, not redundant: per
-   the CSS spec, a "visible" value on one axis is force-computed to "auto"
-   when the other axis is auto/scroll — so overflow-x: auto alone silently
-   turns overflow-y into auto too, producing a stray vertical scrollbar
-   whenever content is even a pixel taller than the box (a tall fraction/
-   matrix glyph, e.g.). Setting overflow-y: hidden explicitly opts out of
-   that coercion; nothing here needs to clip vertically since the container
-   has no height cap. */
+/* overflow-y: hidden is needed: overflow-x: auto alone forces overflow-y to
+   auto and shows a stray vertical scrollbar on tall glyphs. */
 .result-line { overflow-x: auto; overflow-y: hidden; }
 
 .output-panel[data-mode="error"] .output-render {
@@ -710,8 +463,8 @@ button.secondary:hover {
   display: inline-block;
   font-weight: 700;
   font-size: 1.1rem;
-  padding: 0.3rem 0.9rem;
-  border-radius: 999px;
+  padding: 0.25rem 0.8rem;
+  border-radius: var(--radius);
 }
 
 .output-render .result-bool.is-true { color: var(--success); background: var(--success-soft); }
@@ -723,29 +476,23 @@ pre.output-debug {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
-  background: var(--bg);
+  background: var(--input-bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   padding: 0.75rem;
   color: var(--text-dim);
 }
 
 .placeholder {
   color: var(--text-faint);
-  font-style: italic;
   font-size: 1rem;
 }
 
-/* Debug mode: input (LaTeX + MathJSON), the rendered result, and the raw
-   response — stacked as labeled sections rather than replacing the pretty
-   result with just a JSON dump. */
 .debug-section + .debug-section { margin-top: 1.1rem; }
 
 .debug-label {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+  font-weight: 600;
   color: var(--text-faint);
   margin-bottom: 0.35rem;
 }
@@ -755,246 +502,153 @@ pre.output-debug {
   padding: 0.3rem 0.2rem;
 }
 
-/* ---------- Settings panel ---------- */
+/* ---------- Settings dialog ---------- */
 
 .settings-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 16, 30, 0.28);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.3);
   display: none;
   z-index: 20;
 }
 
 .settings-backdrop.open { display: block; }
 
+/* Fixed height so switching tabs doesn't resize the dialog. Sized in rem
+   so it scales with the Zoom setting. */
 .settings-panel {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 320px;
-  max-width: 90vw;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border-left: 1px solid var(--border);
-  padding: 1.5rem;
-  transform: translateX(100%);
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  overflow-y: auto;
-  box-shadow: var(--shadow-lg);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 38rem;
+  max-width: 94vw;
+  height: min(36rem, 88vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+  padding: 1.25rem 1.5rem;
+  overflow: hidden;
 }
 
-.settings-backdrop.open .settings-panel { transform: translateX(0); }
+.settings-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  margin-bottom: 0.75rem;
+}
 
-.settings-panel h2 {
-  font-size: 1.05rem;
-  font-weight: 700;
-  margin-top: 0;
-  margin-bottom: 1.25rem;
+.settings-panel h2 { margin: 0; }
+
+.settings-close {
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 0.85rem;
+}
+
+#settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .settings-tabs {
   display: flex;
-  gap: 0.3rem;
-  margin-bottom: 0.5rem;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
   border-bottom: 1px solid var(--border);
 }
 
 .settings-tab-btn {
-  flex: 1;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 0.6rem 0.3rem;
-  font-family: inherit;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-faint);
+  margin-bottom: -1px;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-dim);
   cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
 }
 
-.settings-tab-btn:hover { color: var(--text-dim); }
+.settings-tab-btn:hover { color: var(--text); }
 
 .settings-tab-btn.is-active {
-  color: var(--accent);
+  color: var(--text);
   border-bottom-color: var(--accent);
 }
 
 .settings-group {
-  margin-bottom: 0;
-  padding: 1.5rem 0 1.6rem;
+  margin: 0;
+  padding: 1rem 0;
   border: none;
   border-top: 1px solid var(--border);
 }
 
-.settings-group:first-child {
-  padding-top: 0;
-  border-top: none;
-}
+.settings-tab-panel > .settings-group:first-child,
+#appearance-body > .settings-group:first-child { border-top: none; }
 
 .settings-group legend {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
+  float: left;
+  width: 100%;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
   padding: 0;
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.4rem;
+}
+
+.settings-group legend + * { clear: both; }
+
+.settings-hint {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin: 0 0 0.7rem;
 }
 
 .settings-group label {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.55rem;
   font-size: 0.92rem;
-  padding: 0.45rem 0.3rem;
+  padding: 0.3rem 0.25rem;
   cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background 0.12s ease;
 }
 
-.settings-group label:hover { background: var(--bg); }
-
 .settings-group label.settings-subitem {
-  margin-top: 0.5rem;
-  padding-top: 0.65rem;
+  margin-top: 0.35rem;
+  padding-top: 0.55rem;
   border-top: 1px dashed var(--border);
 }
 
 .settings-group input[type="radio"],
 .settings-group input[type="checkbox"] {
-  accent-color: var(--accent);
   width: 1rem;
   height: 1rem;
 }
 
-/* Color fields: a row of preset swatches plus a native color picker for an
-   arbitrary choice — accent and background each get one. */
-
-.color-field { margin-top: 0.85rem; }
-
-.color-field-label {
-  display: block;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text-dim);
-  margin-bottom: 0.4rem;
-}
-
-.swatch-row {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  flex-wrap: wrap;
-}
-
-.swatch {
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 50%;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  position: relative;
-  box-shadow: 0 0 0 1px var(--border-strong);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-  flex-shrink: 0;
-}
-
-.swatch:hover { transform: scale(1.1); }
-
-.swatch.is-active { box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text); }
-
-.swatch.is-active::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid #fff;
-  mix-blend-mode: difference;
-}
-
-.swatch[data-accent-preset="blue"]   { background: hsl(215 100% 50%); }
-.swatch[data-accent-preset="red"]    { background: hsl(0 100% 50%); }
-.swatch[data-accent-preset="purple"] { background: hsl(271 100% 50%); }
-.swatch[data-accent-preset="green"]  { background: hsl(142 100% 40%); }
-.swatch[data-accent-preset="orange"] { background: hsl(28 100% 50%); }
-.swatch[data-accent-preset="black"]  { background: hsl(0 0% 8%); }
-
-.swatch[data-accent-secondary-preset="orchid"] { background: hsl(290 55% 64%); }
-.swatch[data-accent-secondary-preset="rose"]   { background: hsl(318 55% 66%); }
-.swatch[data-accent-secondary-preset="cyan"]   { background: hsl(207 50% 58%); }
-.swatch[data-accent-secondary-preset="olive"]  { background: hsl(85 45% 46%); }
-.swatch[data-accent-secondary-preset="bronze"] { background: hsl(28 32% 32%); }
-.swatch[data-accent-secondary-preset="slate"]  { background: hsl(215 28% 30%); }
-
-/* Native color picker, reshaped to sit flush with the round swatches. */
-.color-picker {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 1.6rem;
-  height: 1.6rem;
-  flex-shrink: 0;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  background: var(--panel-bg);
-  box-shadow: 0 0 0 1px var(--border-strong);
-  transition: box-shadow 0.12s ease;
-}
-
-.color-picker.is-active { box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text); }
-
-.color-picker::-webkit-color-swatch-wrapper { padding: 0; border-radius: 50%; }
-.color-picker::-webkit-color-swatch { border: none; border-radius: 50%; }
-.color-picker::-moz-color-swatch { border: none; border-radius: 50%; }
-
-/* Shared layout for any "slider + a value next to it" row (decimal places,
-   panel transparency, ...). Kept separate from .decimals-control below,
-   which is only about disabling *that one* row in standard/exact mode —
-   stacking both classes on the decimals row is what scopes that dimming to
-   just it, instead of catching every .slider-control on the panel. */
-.slider-control {
+/* "Label, control, value" rows: decimals, zoom, opacity, math size. */
+.slider-control,
+.color-row {
   display: flex;
   align-items: center;
   gap: 0.7rem;
-  margin: 0.6rem 0.1rem 0;
-  transition: opacity 0.15s ease;
+  padding: 0.3rem 0.25rem;
+  font-size: 0.92rem;
 }
 
-#settings-body[data-number-format="standard"] .decimals-control {
-  opacity: 0.45;
-  pointer-events: none;
-}
+.slider-control > span:first-child,
+.color-row > span:first-child { min-width: 6rem; }
 
-.slider-control input[type="range"] {
-  flex: 1;
-  accent-color: var(--accent);
-}
+.slider-control input[type="range"] { flex: 1; }
+.slider-control input[type="number"] { width: 4.5rem; flex-shrink: 0; }
 
-.slider-control input[type="number"] {
-  width: 4.5rem;
-  flex-shrink: 0;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  font-size: 0.9rem;
-  background: var(--panel-bg);
-  color: var(--text);
-}
-
-.slider-control input[type="number"]:focus,
-.slider-control input[type="range"]:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.panel-opacity-value,
-.panel-blur-value {
+.slider-value,
+.zoom-value {
   flex-shrink: 0;
   min-width: 3rem;
   text-align: right;
@@ -1002,22 +656,31 @@ pre.output-debug {
   color: var(--text-dim);
 }
 
-/* ---------- History ---------- */
-
-details.history {
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.9rem 1.1rem;
-  box-shadow: var(--shadow-sm);
+#settings-body[data-number-format="standard"] .decimals-control {
+  opacity: 0.45;
+  pointer-events: none;
 }
+
+.color-row input[type="color"] {
+  width: 3rem;
+  height: 1.8rem;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  cursor: pointer;
+}
+
+.color-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.color-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 3px; }
+.color-row input[type="color"]::-moz-color-swatch { border: none; border-radius: 3px; }
+
+/* ---------- History & workspace ---------- */
 
 details.history summary {
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   font-weight: 600;
-  color: var(--text-dim);
   list-style: none;
 }
 
@@ -1026,58 +689,74 @@ details.history summary::-webkit-details-marker { display: none; }
 details.history summary::before {
   content: "▸";
   display: inline-block;
-  margin-right: 0.4rem;
-  transition: transform 0.15s ease;
+  width: 1rem;
   color: var(--text-faint);
 }
 
-details.history[open] summary::before { transform: rotate(90deg); }
+details.history[open] summary::before { content: "▾"; }
 
 .history-header {
   display: flex;
   justify-content: flex-end;
-  margin-top: 0.5rem;
+  margin-top: 0.4rem;
 }
 
 .history-list {
   margin-top: 0.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
   max-height: 260px;
   overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
+
+.history-list:empty { display: none; }
 
 .history-item {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.55rem 0.75rem;
+  padding: 0.5rem 0.7rem;
   font-size: 0.85rem;
   cursor: pointer;
-  background: var(--bg);
-  transition: background 0.12s ease, border-color 0.12s ease;
 }
 
-.history-item:hover { background: var(--accent-soft); border-color: var(--accent); }
-
+.history-item + .history-item { border-top: 1px solid var(--border); }
+.history-item:hover { background: var(--hover); }
 .history-item-body { min-width: 0; flex: 1; }
 
-/* Workspace entries aren't click-to-reuse like history entries are — reset
-   the affordances that imply otherwise. */
+/* Workspace entries aren't click-to-reuse. */
 .workspace-item { cursor: default; }
-.workspace-item:hover { background: var(--bg); border-color: var(--border); }
+.workspace-item:hover { background: none; }
 
-.history-item .history-in { font-family: var(--mono); color: var(--text); }
-.history-item .history-out { color: var(--text-dim); margin-top: 0.15rem; font-size: 0.8rem; }
+.history-item .history-out {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--text-dim);
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+}
+.history-item .history-out .history-math { color: var(--accent-secondary); }
+.history-when { margin-left: auto; flex-shrink: 0; color: var(--text-faint); }
 
-/* Per-entry delete button, same hover-to-reveal treatment as the Plot
-   page's .expr-delete so removing a history/workspace entry works the
-   same way removing a plot expression row already does. */
-.item-delete {
+/* Rendered math in history and workspace rows. Long expressions scroll
+   sideways instead of widening the panel. */
+.history-math {
+  display: block;
+  min-width: 0;
+  padding: 0.15em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  font-size: calc(1rem * var(--math-scale, 1));
+}
+.history-out .history-math { font-size: calc(0.95rem * var(--math-scale, 1)); }
+.history-math .ML__latex { cursor: inherit; }
+
+.item-delete,
+.expr-delete {
   border: none;
   background: transparent;
   color: var(--text-faint);
@@ -1086,26 +765,21 @@ details.history[open] summary::before { transform: rotate(90deg); }
   width: 1.6rem;
   height: 1.6rem;
   flex-shrink: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
-.history-item:hover .item-delete,
-.history-item:focus-within .item-delete {
-  opacity: 1;
-}
-
-.item-delete:hover {
-  background: var(--error-soft);
-  color: var(--error);
-}
+.item-delete:hover,
+.expr-delete:hover { background: var(--accent-secondary-soft); color: var(--accent-secondary); }
 
 .empty-note {
   color: var(--text-faint);
   font-size: 0.9rem;
 }
+
+/* Inside the bordered history/workspace lists, line up with the rows. */
+.history-list .empty-note,
+.workspace-list .empty-note { margin: 0; padding: 0.6rem 0.7rem; }
 
 /* ---------- Help page ---------- */
 
@@ -1117,31 +791,18 @@ details.history[open] summary::before { transform: rotate(90deg); }
   margin-bottom: 0.9rem;
 }
 
-.help-section-heading h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-}
+.help-section-heading h2 { margin: 0; }
 
 .help-examples {
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
-.help-example {
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  /* A "recessed well" one shade darker than the surrounding .panel, so it
-     was solid --bg while the panel around it (see .panel above) turned
-     translucent under the transparency slider — a flat opaque (near-black
-     in dark mode) square sitting inside an otherwise see-through card.
-     Applying the same panel-alpha/panel-blur keeps it recessed but in step
-     with everything else. */
-  background: color-mix(in srgb, var(--bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-}
+.help-example { padding: 0.7rem 0.9rem; }
+.help-example + .help-example { border-top: 1px solid var(--border); }
 
 .help-example-math {
   font-size: calc(1.2rem * var(--math-scale, 1));
@@ -1151,7 +812,7 @@ details.history[open] summary::before { transform: rotate(90deg); }
 
 .help-example-note {
   margin-top: 0.4rem;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   color: var(--text-dim);
   line-height: 1.4;
 }
@@ -1177,12 +838,11 @@ details.history[open] summary::before { transform: rotate(90deg); }
   font-family: var(--mono);
 }
 
+code { font-family: var(--mono); font-size: 0.9em; }
+
 /* ---------- Misc page ---------- */
 
-.misc-coming-soon .empty-note {
-  margin-top: 0.4rem;
-  margin-bottom: 1.1rem;
-}
+.misc-coming-soon .empty-note { margin: 0.4rem 0 1rem; }
 
 .misc-feature-list {
   list-style: none;
@@ -1190,41 +850,30 @@ details.history[open] summary::before { transform: rotate(90deg); }
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .misc-feature-list li {
-  padding: 0.6rem 0.85rem;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   color: var(--text-dim);
   font-size: 0.92rem;
 }
 
 /* ---------- Plot page ---------- */
 
-/* The plot view trades the single-column `main` layout every other view
-   uses for a fixed-height Desmos-style split: expression list left, graph
-   right. `.plot-layout` is only ever on the one <main data-view="plot">
-   landmark, so no further scoping is needed to keep this off Compute's
-   <main>. */
+/* Fixed-height split: expression list left, graph right. */
 main.plot-layout {
   max-width: 1700px;
-  height: calc(100vh - 4.5rem);
+  height: calc(100vh - 4rem);
   padding: 1.25rem;
   display: grid;
   grid-template-columns: 340px 1fr;
   gap: 1.25rem;
 }
 
-/* ---------- Expression list (left) ---------- */
-
 .expr-panel {
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1232,28 +881,17 @@ main.plot-layout {
 }
 
 .expr-panel-header {
-  padding: 1.1rem 1.1rem 0.85rem;
+  padding: 1rem 1rem 0.8rem;
   border-bottom: 1px solid var(--border);
 }
 
-.expr-panel-header h2 {
-  margin: 0 0 0.3rem;
-  font-size: 1rem;
-  font-weight: 700;
-}
+.expr-panel-header h2 { margin: 0 0 0.3rem; }
 
 .expr-panel-subtitle {
   margin: 0;
-  font-size: 0.78rem;
-  color: var(--text-faint);
+  font-size: 0.8rem;
+  color: var(--text-dim);
   line-height: 1.4;
-}
-
-.expr-panel-subtitle code {
-  font-family: var(--mono);
-  background: var(--bg);
-  border-radius: 4px;
-  padding: 0.05rem 0.3rem;
 }
 
 .expr-list {
@@ -1264,58 +902,43 @@ main.plot-layout {
 
 .expr-add {
   margin: 0.4rem;
-  padding: 0.6rem;
+  padding: 0.55rem;
   border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-dim);
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.expr-add:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
-}
+.expr-add:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 
 .expr-row {
   position: relative;
   display: flex;
   align-items: flex-start;
   gap: 0.55rem;
-  padding: 0.55rem 0.5rem;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s ease, opacity 0.15s ease;
+  padding: 0.5rem;
+  border-radius: var(--radius);
 }
 
-.expr-row:hover {
-  background: var(--bg);
-}
-
-.expr-row.is-off-mode {
-  opacity: 0.5;
-}
+.expr-row.is-off-mode { opacity: 0.5; }
 
 .expr-dot {
-  width: 15px;
-  height: 15px;
-  min-width: 15px;
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
   border-radius: 50%;
   border: none;
   padding: 0;
   margin-top: 0.85rem;
   cursor: pointer;
   background: var(--dot-color, var(--border-strong));
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-.expr-dot:hover:not(:disabled) { transform: scale(1.15); }
-
 .expr-dot.is-hidden {
-  background: var(--panel-bg);
+  background: transparent;
   box-shadow: inset 0 0 0 2px var(--dot-color, var(--border-strong));
 }
 
@@ -1326,24 +949,14 @@ main.plot-layout {
 }
 
 .expr-settings-popover {
-  position: absolute;
   top: 2.1rem;
   left: 0.4rem;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
   padding: 0.7rem;
   z-index: 6;
   width: 230px;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-}
-
-.expr-settings-popover[hidden] {
-  display: none;
+  gap: 0.7rem;
 }
 
 .expr-settings-section {
@@ -1357,31 +970,14 @@ main.plot-layout {
   border-top: 1px solid var(--border);
 }
 
-.expr-settings-label {
+.expr-settings-label,
+.export-menu-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-faint);
+  color: var(--text-dim);
 }
 
-.expr-settings-section select {
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  font-size: 0.82rem;
-  background: var(--panel-bg);
-  color: var(--text);
-}
-
-.expr-settings-section select:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.expr-settings-section .plot-range-inputs input[type="number"] {
-  font-size: 0.82rem;
-  padding: 0.4rem 0.5rem;
-}
+.export-menu-label { padding: 0.35rem 0.65rem 0.15rem; }
 
 .expr-color-swatches {
   display: grid;
@@ -1397,94 +993,39 @@ main.plot-layout {
   padding: 0;
   cursor: pointer;
   box-shadow: 0 0 0 1px var(--border-strong);
-  transition: transform 0.1s ease;
 }
 
-.expr-color-swatch:hover { transform: scale(1.12); }
+.expr-color-swatch.is-active { box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text); }
 
-.expr-color-swatch.is-active {
-  box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text);
-}
+/* The last swatch is a native color input, restyled to match. */
+.expr-color-swatch.expr-color-custom { -webkit-appearance: none; appearance: none; }
+.expr-color-swatch.expr-color-custom::-webkit-color-swatch-wrapper { padding: 0; border-radius: 50%; }
+.expr-color-swatch.expr-color-custom::-webkit-color-swatch { border: none; border-radius: 50%; }
+.expr-color-swatch.expr-color-custom::-moz-color-swatch { border: none; border-radius: 50%; }
 
-/* The 8th swatch is a real <input type="color"> (native OS picker for an
-   arbitrary custom color) rather than a fixed-hex button — stripped of the
-   browser's own square swatch chrome so it matches the round palette
-   buttons around it. */
-.expr-color-swatch.expr-color-custom {
-  -webkit-appearance: none;
-  appearance: none;
-  border: none;
-  padding: 0;
-}
+.expr-color-popover-toggle { width: 100%; }
 
-.expr-color-swatch.expr-color-custom::-webkit-color-swatch-wrapper {
-  padding: 0;
-  border-radius: 50%;
-}
+.expr-body { flex: 1; min-width: 0; }
 
-.expr-color-swatch.expr-color-custom::-webkit-color-swatch {
-  border: none;
-  border-radius: 50%;
-}
-
-.expr-color-swatch.expr-color-custom::-moz-color-swatch {
-  border: none;
-  border-radius: 50%;
-}
-
-.expr-color-popover-toggle {
-  width: 100%;
-  border: 1px solid var(--border-strong);
-  background: var(--bg);
-  color: var(--text-dim);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 0.4rem;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.expr-color-popover-toggle:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.expr-body {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Compact per-row field — smaller than the Compute page's single big
-   math-field, and with mathlive's own toggle/menu icon chrome hidden so a
-   list of several rows doesn't look cluttered. */
 .expr-field {
   display: block;
   width: 100%;
   font-size: calc(1.05rem * var(--math-scale, 1));
-  padding: 0.5rem 0.65rem;
-  border: 1.5px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  /* See the same property on the top-level math-field rule: without this,
-     mouse-driven caret placement/selection depends on the host engine's
-     default user-select resolution at upgrade time instead of an explicit
-     value. */
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  /* See math-field above. */
   user-select: text;
 }
 
 .expr-field:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
   outline: none;
 }
 
 .expr-field::part(virtual-keyboard-toggle),
-.expr-field::part(menu-toggle) {
-  display: none;
-}
+.expr-field::part(menu-toggle) { display: none; }
 
 .expr-badge {
   margin-top: 0.35rem;
@@ -1494,50 +1035,20 @@ main.plot-layout {
 
 .expr-badge.is-dim {
   display: inline-block;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
 }
 
 .expr-badge.is-dim.is-inactive {
-  background: var(--bg);
+  background: var(--hover);
   color: var(--text-faint);
 }
 
-.expr-badge.is-error {
-  color: var(--error);
-}
+.expr-badge.is-error { color: var(--error); }
 
-.expr-delete {
-  border: none;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 1.1rem;
-  line-height: 1;
-  width: 1.6rem;
-  height: 1.6rem;
-  margin-top: 0.55rem;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
-}
-
-.expr-row:hover .expr-delete,
-.expr-row:focus-within .expr-delete {
-  opacity: 1;
-}
-
-.expr-delete:hover {
-  background: var(--error-soft);
-  color: var(--error);
-}
-
-/* Constant slider */
+.expr-delete { margin-top: 0.55rem; }
 
 .expr-slider {
   margin-top: 0.5rem;
@@ -1546,32 +1057,14 @@ main.plot-layout {
   gap: 0.5rem;
 }
 
-.expr-slider[hidden] {
-  display: none;
-}
-
-.expr-slider input[type="range"] {
-  flex: 1;
-  accent-color: var(--accent);
-}
+.expr-slider[hidden] { display: none; }
+.expr-slider input[type="range"] { flex: 1; }
 
 .expr-slider input[type="number"] {
   width: 3.6rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.4rem;
   font-size: 0.78rem;
-  background: var(--panel-bg);
-  color: var(--text-dim);
 }
-
-.expr-slider input[type="number"]:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-/* ---------- Plot stage (right) ---------- */
 
 .plot-stage {
   display: flex;
@@ -1579,22 +1072,18 @@ main.plot-layout {
   min-width: 0;
 }
 
-/* The graph is one card — toolbar as its (opaque) header strip, canvas
-   filling the rest below it. Not an overlay: an overlay translucently
-   covered part of the graph, which is worse than the "disconnected boxes"
-   look it was fixing. The settings/export dropdowns still float above
-   content when opened, same as any menu. */
-/* Explicit position+z-index (rather than leaving it z-index:auto) is load
-   bearing here. This element's own backdrop-filter already makes it a
-   stacking context by itself; without a z-index that context paints as
-   z-index:0, and — being earlier in the DOM than the sibling
-   .plot-canvas-area holding Plotly's WebGL canvas — an auto/0 context
-   paints BEHIND a later sibling. That trapped the export/graph-settings
-   dropdowns nested inside this toolbar underneath the plot regardless of
-   their own z-index, since a descendant's z-index only ever competes
-   within its nearest ancestor stacking context, never past it. Giving the
-   toolbar itself a z-index above the canvas area's (auto) is what actually
-   lets its dropdowns render on top of the plot. */
+.plot-panel {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Sits above the canvas area so its dropdowns render over the plot. */
 .plot-toolbar {
   position: relative;
   z-index: 2;
@@ -1602,20 +1091,15 @@ main.plot-layout {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.65rem 0.85rem;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
+  padding: 0.6rem 0.8rem;
   border-bottom: 1px solid var(--border);
-  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .mode-toggle {
   display: flex;
-  gap: 0.2rem;
-  background: var(--bg);
-  padding: 0.2rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
   flex-shrink: 0;
 }
 
@@ -1624,17 +1108,17 @@ main.plot-layout {
   background: transparent;
   color: var(--text-dim);
   font-size: 0.82rem;
-  font-weight: 700;
-  padding: 0.4rem 1rem;
-  border-radius: 999px;
+  font-weight: 600;
+  padding: 0.35rem 0.9rem;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
 }
+
+.mode-btn + .mode-btn { border-left: 1px solid var(--border-strong); }
+.mode-btn:hover:not(.is-active) { background: var(--hover); color: var(--text); }
 
 .mode-btn.is-active {
   background: var(--accent);
   color: var(--accent-text);
-  box-shadow: var(--shadow-sm);
 }
 
 .plot-toolbar-titles {
@@ -1645,14 +1129,11 @@ main.plot-layout {
   line-height: 1.3;
 }
 
-.plot-title {
-  font-weight: 700;
-  font-size: 0.95rem;
-}
+.plot-title { font-weight: 600; font-size: 0.95rem; }
 
 .plot-subtitle {
-  font-size: 0.78rem;
-  color: var(--text-faint);
+  font-size: 0.8rem;
+  color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1665,74 +1146,22 @@ main.plot-layout {
   flex-shrink: 0;
 }
 
-.export-menu-wrap {
-  position: relative;
-}
+.export-menu-wrap,
+.graph-settings-wrap { position: relative; }
 
 .export-menu {
-  position: absolute;
-  top: calc(100% + 0.4rem);
+  top: calc(100% + 0.35rem);
   right: 0;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
-  padding: 0.35rem;
+  padding: 0.3rem;
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
   min-width: 150px;
   z-index: 5;
 }
 
-.export-menu[hidden] {
-  display: none;
-}
-
-.export-menu button {
-  border: none;
-  background: transparent;
-  text-align: left;
-  padding: 0.5rem 0.6rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.export-menu button:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.export-menu-label {
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-  padding: 0.35rem 0.6rem 0.15rem;
-}
-
-.export-menu-divider {
-  border-top: 1px solid var(--border);
-  margin: 0.25rem 0;
-}
-
-.graph-settings-wrap {
-  position: relative;
-}
-
 .graph-settings-panel {
-  position: absolute;
-  top: calc(100% + 0.5rem);
+  top: calc(100% + 0.35rem);
   right: 0;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
   padding: 0.9rem;
   display: flex;
   flex-direction: column;
@@ -1743,10 +1172,6 @@ main.plot-layout {
   z-index: 5;
 }
 
-.graph-settings-panel[hidden] {
-  display: none;
-}
-
 .settings-row {
   display: flex;
   flex-direction: column;
@@ -1754,39 +1179,16 @@ main.plot-layout {
 }
 
 .settings-row label {
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.82rem;
+  font-weight: 500;
   color: var(--text-dim);
   display: flex;
   align-items: center;
   gap: 0.4rem;
 }
 
-.settings-row input[type="checkbox"] {
-  accent-color: var(--accent);
-  width: 1rem;
-  height: 1rem;
-}
-
-.settings-row input[type="range"] {
-  accent-color: var(--accent);
-  width: 100%;
-}
-
-.settings-row select {
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-  background: var(--panel-bg);
-  color: var(--text);
-}
-
-.settings-row select:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
+.settings-row input[type="checkbox"] { width: 1rem; height: 1rem; }
+.settings-row input[type="range"] { width: 100%; }
 
 .settings-row-pair {
   display: flex;
@@ -1802,14 +1204,12 @@ main.plot-layout {
 
 .settings-row-pair label {
   font-size: 0.75rem;
-  font-weight: 600;
   color: var(--text-faint);
 }
 
 .plot-range-inputs {
   display: flex;
   gap: 0.5rem;
-  transition: opacity 0.15s ease;
 }
 
 .plot-range-inputs.is-disabled {
@@ -1820,39 +1220,8 @@ main.plot-layout {
 .plot-range-inputs input[type="number"] {
   width: 100%;
   min-width: 0;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  font-size: 0.9rem;
-  background: var(--panel-bg);
-  color: var(--text);
 }
 
-.plot-range-inputs input[type="number"]:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.plot-panel {
-  position: relative;
-  background: color-mix(in srgb, var(--panel-bg) var(--panel-alpha), transparent);
-  backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* The part of the card below the toolbar — canvas, placeholder and error
-   are all layered here (not over the toolbar), so nothing graphed is ever
-   hidden under the chrome. */
 .plot-canvas-area {
   position: relative;
   flex: 1;
@@ -1877,16 +1246,15 @@ main.plot-layout {
   z-index: 2;
   color: var(--error);
   background: var(--error-soft);
-  border-radius: var(--radius-sm);
-  padding: 0.75rem 1rem;
+  border: 1px solid var(--error);
+  border-radius: var(--radius);
+  padding: 0.7rem 1rem;
   font-size: 0.9rem;
-  box-shadow: var(--shadow-md);
 }
 
 @media (max-width: 520px) {
   header.topbar h1 { display: none; }
   main { padding: 1.25rem 0.85rem 2.5rem; }
-  .settings-panel { width: 100%; }
 }
 
 @media (max-width: 860px) {

@@ -90,11 +90,18 @@ def test_frozen_integral_over_a_workspace_functions_own_parameter_retries(resolv
     # that substitution, when x is still free, so the integral used to get
     # permanently frozen as an unevaluated sp.Integral with nothing ever
     # retrying it once a concrete number was actually supplied.
-    # retry_unresolved_integrals is what gives it a second chance. Known
-    # slow (~5-10s): sympy's own antiderivative search times out, Maxima's
-    # bridge is tried next, and mpmath quadrature is what actually closes
-    # it — that fallback chain is the thing under test here, not just the
-    # final number.
+    # retry_unresolved_integrals is what gives it a second chance. User-
+    # reported as "took ages" once retrying actually worked: the retry used
+    # to redo the *entire* symbolic chain (sp.integrate's own timeout, then
+    # Maxima) a second time even though that's the exact same functional
+    # shape that already failed to close symbolically once, just with x
+    # still free instead of concrete — wasted latency, since a different
+    # constant essentially never turns "no closed form" into "closed form"
+    # for a case like this. _resolve_definite_integral's try_symbolic=False
+    # (used only by retry_unresolved_integrals) skips straight to mpmath
+    # quadrature instead, cutting this from ~5s to ~2-3s (the remaining time
+    # is the unavoidable first attempt, before x=3 is even known, which
+    # still has to try and fail symbolically once).
     integrand = ["Exp", ["Negate", ["Divide",
         ["Power", "x", 2],
         ["Multiply", 2, ["Power", ["Sin", "theta"], 2]],
@@ -103,10 +110,83 @@ def test_frozen_integral_over_a_workspace_functions_own_parameter_retries(resolv
     body = ["Multiply", ["Divide", 1, "Pi"], integral]
     functions = {"Q": {"params": ["x"], "body": body}}
 
+    start = time.time()
     response = resolve(["Q", 3], functions=functions)
+    elapsed = time.time() - start
 
     assert response["mode"] == "evaluate"
     assert response["numeric"] == pytest.approx(0.00134989803163, abs=1e-6)
+    assert elapsed < 4, f"Q(3) took {elapsed:.1f}s — the retry-skips-symbolic speedup regressed"
+
+
+def test_transcendental_two_variable_system_falls_back_to_numeric(resolve):
+    # User-reported: a genuinely transcendental system (no polynomial/
+    # rational structure for sp.solve's algorithms — here, a coupled
+    # trig pair standing in for the shape of a real engineering system,
+    # e.g. a PCB transmission-line width/height + effective-permittivity
+    # pair) came back completely unsolved ("mode": "system", "result": [])
+    # instead of a numeric answer, even though the system has a perfectly
+    # good real root findable by ordinary multivariate root-finding.
+    # solve_system used to give up outright the moment sp.solve returned
+    # nothing (or raised NotImplementedError, or timed out) for a system
+    # with no closed form; it now tries try_numerical_system (mpmath
+    # multi-start root-finding) before reporting "unsolved", for any square
+    # system (as many equations as unknowns).
+    eq1 = ["Equal", ["Add", ["Cos", "x"], "y"], 2]
+    eq2 = ["Equal", ["Add", "x", ["Sin", "y"]], 1]
+
+    response = resolve(["List", eq1, eq2])
+
+    assert response["mode"] == "system"
+    assert response["result"] != []
+    result_text = " ".join(response["result"])
+    assert "0.1523" in result_text
+    assert "1.0115" in result_text
+
+
+def test_microstrip_system_solves_numerically_without_hanging(resolve):
+    # User-reported: a Hammerstad-Wheeler microstrip pair (2 nonlinear
+    # equations, unknowns W and e_eff) hung the app. sp.solve held the GIL
+    # for minutes, so its thread timeout never fired. Non-polynomial square
+    # systems now go to the numeric solver first.
+    w_over_h = ["Divide", "W", 1.6]
+    eq1 = ["Equal", "e", ["Add", 2.7, ["Multiply", 1.7,
+        ["Power", ["Add", 1, ["Divide", 19.2, "W"]], -0.5]]]]
+    eq2 = ["Equal", 50, ["Divide", ["Multiply", 120, "Pi"],
+        ["Multiply", ["Sqrt", "e"],
+            ["Add", w_over_h, 1.393, ["Multiply", 0.667, ["Ln", ["Add", w_over_h, 1.444]]]]]]]
+
+    start = time.monotonic()
+    response = resolve(["List", eq1, eq2])
+    assert time.monotonic() - start < 5
+
+    assert response["mode"] == "system"
+    result_text = " ".join(response["result"])
+    assert "3.0829" in result_text
+    assert "3.3323" in result_text
+
+
+def test_prefer_algebraic_setting_controls_transcendental_systems(resolve):
+    # Off (default): a non-polynomial square system goes straight to the
+    # numeric solver. On: sp.solve gets a go first (in a killable
+    # subprocess), so this one comes back exact.
+    system = ["List", ["Equal", ["Sin", "x"], ["Rational", 1, 2]], ["Equal", ["Add", "x", "y"], 1]]
+
+    numeric = resolve(system)
+    assert numeric["mode"] == "system"
+    assert "0.5235987" in " ".join(numeric["result"])
+
+    exact = resolve(system, prefer_algebraic=True)
+    assert exact["mode"] == "system"
+    assert "pi/6" in " ".join(exact["result"])
+
+
+def test_single_numeric_root_renders(resolve):
+    # A lone numeric root used to come back as a bare float, which crashed
+    # _exact_mathjson in the renderer.
+    response = resolve(["Equal", ["Cos", "x"], "x"])
+    assert response["mode"] == "solve"
+    assert response["numeric"] == pytest.approx(0.7390851332)
 
 
 def test_convergence_conditioned_definite_integral_returns_piecewise_not_error(resolve):

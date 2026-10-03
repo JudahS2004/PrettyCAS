@@ -4,66 +4,70 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PrettyCAS</title>
-  <script src="./theme/theme-init.js"></script>
-  <link rel="stylesheet" href="./node_modules/mathlive/mathlive-static.css">
+  <script src="./theme-init.js"></script>
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./node_modules/mathlive/mathlive-static.css">
 </head>
 <body>
   <canvas id="bg-fx-canvas" class="bg-fx-canvas" aria-hidden="true"></canvas>
   <header class="topbar">
+    <div class="menu-wrap">
+      <button id="misc-menu-toggle" class="icon-button" title="More" aria-label="More">&#9776;</button>
+      <div id="misc-menu" class="misc-menu" hidden>
+        <label class="misc-menu-check"><input type="checkbox" id="debug-toggle-checkbox"> Debug mode</label>
+        <div class="misc-menu-divider"></div>
+        <a href="#" data-view="help">Help</a>
+        <a href="#" data-view="misc">Misc</a>
+      </div>
+    </div>
     <h1 id="app-title" title="Click to toggle debug mode">PrettyCAS</h1>
     <nav class="pages">
       <a href="#" data-view="compute" aria-current="page">Compute</a>
       <a href="#" data-view="plot">Plot</a>
-      <a href="#" data-view="help">Help</a>
     </nav>
-    <div class="menu-wrap">
-      <button id="misc-menu-toggle" class="icon-button" title="More" aria-label="More">&#9776;</button>
-      <div id="misc-menu" class="misc-menu" hidden>
-        <a href="#" data-view="misc">Misc</a>
-      </div>
-    </div>
     <button id="settings-toggle" class="icon-button" title="Settings" aria-label="Settings">&#9881;</button>
   </header>
 
   <main data-view="compute">
-    <div class="panel">
-      <math-field id="mf" style="display: block; width: 100%;"></math-field>
-      <div class="row quick-toggles">
-        <button type="button" class="cycle-toggle" id="angle-toggle" title="Click to change angle mode"></button>
-        <button type="button" class="cycle-toggle" id="number-toggle" title="Click to change number format"></button>
-        <button type="button" class="cycle-toggle" id="simplify-toggle" title="Click to change result form"></button>
-        <button id="clear-input" class="copy-btn" title="Clear input">Clear</button>
-        <button id="copy-input" class="copy-btn" title="Copy input">Copy</button>
+    <div class="panel-stack">
+      <div class="panel-section">
+        <math-field id="mf" style="display: block; width: 100%;"></math-field>
+        <div class="row quick-toggles">
+          <button type="button" class="cycle-toggle" id="angle-toggle" title="Click to change angle mode"></button>
+          <button type="button" class="cycle-toggle" id="number-toggle" title="Click to change number format"></button>
+          <button type="button" class="cycle-toggle" id="simplify-toggle" title="Click to change result form"></button>
+          <button id="clear-input" class="copy-btn" title="Clear input">Clear</button>
+          <button id="copy-input" class="copy-btn" title="Copy input">Copy</button>
+        </div>
       </div>
+
+      <div id="output-panel" class="panel-section output-panel" data-mode="idle">
+        <h2 class="output-panel-title">Output</h2>
+        <div class="output-panel-header">
+          <div id="output-badges" class="badges"></div>
+          <button id="copy-output" class="copy-btn" title="Copy output">Copy</button>
+        </div>
+        <div id="output-render" class="output-render">
+          <span class="placeholder">Result will show up here.</span>
+        </div>
+      </div>
+
+      <details class="panel-section history" id="workspace">
+        <summary>Workspace</summary>
+        <div class="history-header">
+          <button type="button" id="clear-workspace" class="copy-btn">Clear</button>
+        </div>
+        <div class="workspace-list"></div>
+      </details>
+
+      <details class="panel-section history" id="history">
+        <summary>History</summary>
+        <div class="history-header">
+          <button type="button" id="clear-history" class="copy-btn">Clear</button>
+        </div>
+        <div class="history-list"></div>
+      </details>
     </div>
-
-    <div id="output-panel" class="panel output-panel" data-mode="idle">
-      <h2 class="output-panel-title">Output</h2>
-      <div class="output-panel-header">
-        <div id="output-badges" class="badges"></div>
-        <button id="copy-output" class="copy-btn" title="Copy output">Copy</button>
-      </div>
-      <div id="output-render" class="output-render">
-        <span class="placeholder">Result will show up here.</span>
-      </div>
-    </div>
-
-    <details class="history" id="workspace">
-      <summary>Workspace</summary>
-      <div class="history-header">
-        <button type="button" id="clear-workspace" class="copy-btn">Clear</button>
-      </div>
-      <div class="workspace-list"></div>
-    </details>
-
-    <details class="history" id="history">
-      <summary>History</summary>
-      <div class="history-header">
-        <button type="button" id="clear-history" class="copy-btn">Clear</button>
-      </div>
-      <div class="history-list"></div>
-    </details>
   </main>
 
   <main data-view="plot" class="plot-layout" hidden>
@@ -120,14 +124,16 @@
   </main>
 
   <main data-view="help" hidden>
-    <div class="panel">
-      <h2>What can I type?</h2>
-      <p>Type real math notation with a keyboard (<code>x^2</code>, <code>sqrt(16)</code>, <code>x_1</code>); the field turns it into proper notation as you type. Or use the keyboard icon for a symbol palette.</p>
-      <p>Numbers has a third option, <strong>Engineering</strong>: same decimal evaluation, but the exponent is always a multiple of 3 (<code>12.3e6</code>, not <code>1.23e7</code>).</p>
-      <p>The Compute page keeps a <strong>Workspace</strong> below the output. Type <code>r = 5</code> and <code>r</code> is remembered for later inputs (<code>r + 2</code> evaluates to <code>7</code>) until you clear it or reload. Type <code>f(x) = x^2 + 1</code> to define a function the same way; later inputs can call it (<code>f(3)</code>), differentiate it, or plot it. Only <code>f</code>, <code>g</code>, and <code>h</code> can be defined as functions.</p>
-    </div>
+    <div class="panel-stack">
+      <div class="panel-section">
+        <h2>What can I type?</h2>
+        <p>Type real math notation with a keyboard (<code>x^2</code>, <code>sqrt(16)</code>, <code>x_1</code>); the field turns it into proper notation as you type. Or use the keyboard icon for a symbol palette.</p>
+        <p>Numbers has a third option, <strong>Engineering</strong>: same decimal evaluation, but the exponent is always a multiple of 3 (<code>12.3e6</code>, not <code>1.23e7</code>).</p>
+        <p>The Compute page keeps a <strong>Workspace</strong> below the output. Type <code>r = 5</code> and <code>r</code> is remembered for later inputs (<code>r + 2</code> evaluates to <code>7</code>) until you clear it or reload. Type <code>f(x) = x^2 + 1</code> to define a function the same way; later inputs can call it (<code>f(3)</code>), differentiate it, or plot it. Only <code>f</code>, <code>g</code>, and <code>h</code> can be defined as functions.</p>
+      </div>
 
-    <div id="help-sections"></div>
+      <div id="help-sections"></div>
+    </div>
   </main>
 
   <main data-view="misc" hidden>
@@ -145,12 +151,14 @@
 
   <div id="settings-backdrop" class="settings-backdrop">
     <aside class="settings-panel">
-      <h2>Settings</h2>
+      <div class="settings-panel-header">
+        <h2>Settings</h2>
+        <button type="button" id="settings-close" class="icon-button settings-close" title="Close" aria-label="Close">&#10005;</button>
+      </div>
       <div id="settings-body"></div>
     </aside>
   </div>
 
-  <script type="module" async src="./theme/background-fx.js"></script>
   <script type="module" src="./shell.js"></script>
 </body>
 </html>

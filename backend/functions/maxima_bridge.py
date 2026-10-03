@@ -54,14 +54,17 @@ def _to_maxima(expr):
     return s.replace("**", "^")
 
 
-def _from_maxima(s, var):
+def _from_maxima(s, *syms):
     """The reverse: Maxima's plain-text answer -> a sympy expression. Only
-    needs to cover what its integrate() can actually hand back — mainly
-    polylogarithms (`li[n](...)`, the whole reason this bridge exists),
-    Maxima's own constant spellings, and the function-name differences
-    _to_maxima introduces going the other way. `var` is passed in (rather
-    than assumed to be the module-level `x` elsewhere in this file) so this
-    stays correct for whatever symbol the caller actually integrated over.
+    needs to cover what its integrate()/simplify can actually hand back —
+    mainly polylogarithms (`li[n](...)`, the whole reason this bridge
+    exists), Maxima's own constant spellings, and the function-name
+    differences _to_maxima introduces going the other way. `syms` are passed
+    in (rather than assumed to be the module-level `x` elsewhere in this
+    file) so this stays correct for whatever symbol(s) the caller actually
+    used — and, importantly, resolves back to the *same* Symbol objects
+    rather than fresh ones sympify would otherwise mint, which matters if
+    the originals carried assumptions (positive=True, etc.).
     """
     py = s.replace("^", "**")
     py = re.sub(r"li\[(\d+)\]\(", r"polylog(\1, ", py)
@@ -75,7 +78,7 @@ def _from_maxima(s, var):
         "polylog": sp.polylog, "erf": sp.erf, "erfi": sp.erfi, "erfc": sp.erfc,
         "bessel_j": sp.besselj, "gamma": sp.gamma, "abs": sp.Abs,
         "zeta": sp.zeta, "Zeta": sp.zeta,
-        str(var): var,
+        **{str(v): v for v in syms},
     })
 
 
@@ -136,6 +139,24 @@ def integrate_indefinite(body, var):
         return None
     try:
         return _from_maxima(result, var)
+    except Exception:
+        return None
+
+
+def simplify(expr):
+    """General-purpose simplification via Maxima, tried (as a test) ahead of
+    sympy's own simplify() when the user's engine preference is set to
+    Maxima. radcan() is Maxima's broad radical/log/exp canonicalizer;
+    trigsimp() first collapses trig identities radcan doesn't touch on its
+    own. Returns a sympy expression, or None for every non-answer case (see
+    _run_maxima) so the caller falls back to sympy exactly the way the
+    integration bridge does.
+    """
+    result = _run_maxima(f"radcan(trigsimp({_to_maxima(expr)}));")
+    if result is None:
+        return None
+    try:
+        return _from_maxima(result, *expr.free_symbols)
     except Exception:
         return None
 

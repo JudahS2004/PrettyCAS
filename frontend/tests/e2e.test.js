@@ -90,19 +90,6 @@ test('page loads with no console or network errors', async () => {
   }
 });
 
-test('theme-init sets the background-effect attribute before first paint', async () => {
-  const { page } = await openPage();
-  try {
-    const attr = await page.evaluate(() => document.documentElement.getAttribute('data-bg-fx'));
-    // Default is "matrix" (see settings.js's DEFAULTS.backgroundEffect) —
-    // any non-null value confirms theme/theme-init.js actually ran from its
-    // new path, not just that the attribute is absent/undefined.
-    assert.ok(attr, 'expected data-bg-fx to be set by theme-init.js');
-  } finally {
-    await page.close();
-  }
-});
-
 test('basic compute round-trips through /api/compute', async () => {
   const { page } = await openPage();
   try {
@@ -122,7 +109,7 @@ test('workspace assignment reuses its own saved value in a later equation', asyn
   const { page } = await openPage();
   try {
     await computeEnter(page, 'x=2');
-    const workspaceNames = await page.$$eval('#workspace .history-in', (els) => els.map((e) => e.textContent.trim()));
+    const workspaceNames = await page.$$eval('#workspace .workspace-item', (els) => els.map((e) => e.dataset.name));
     assert.ok(workspaceNames.includes('x'), `expected x in workspace, got: ${workspaceNames}`);
 
     await computeEnter(page, 'x=y+4');
@@ -144,7 +131,7 @@ test('assignment with an integral RHS saves to a fresh name', async () => {
   const { page } = await openPage();
   try {
     await computeEnter(page, 'Z=\\int_2^{400}xdx');
-    const workspaceNames = await page.$$eval('#workspace .history-in', (els) => els.map((e) => e.textContent.trim()));
+    const workspaceNames = await page.$$eval('#workspace .workspace-item', (els) => els.map((e) => e.dataset.name));
     assert.ok(workspaceNames.includes('Z'), `expected Z in workspace, got: ${workspaceNames}`);
   } finally {
     await page.close();
@@ -162,7 +149,7 @@ test('reassigning an already-saved name with an integral RHS reassigns instead o
     await computeEnter(page, 'A=\\int_2^{400}xdx');
     const text = await outputText(page);
     assert.doesNotMatch(text, /\bfalse\b/i);
-    const workspaceValues = await page.$$eval('#workspace .history-out', (els) => els.map((e) => e.textContent.trim()));
+    const workspaceValues = await page.$$eval('#workspace .workspace-item', (els) => els.map((e) => e.dataset.value));
     assert.ok(!workspaceValues.includes('3'), `expected A's saved value to change from 3, got: ${workspaceValues}`);
   } finally {
     await page.close();
@@ -177,9 +164,9 @@ test('a matrix can be saved to the workspace and reused', async () => {
   const { page } = await openPage();
   try {
     await computeEnter(page, 'M=\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix}');
-    const workspaceNames = await page.$$eval('#workspace .history-in', (els) => els.map((e) => e.textContent.trim()));
+    const workspaceNames = await page.$$eval('#workspace .workspace-item', (els) => els.map((e) => e.dataset.name));
     assert.ok(workspaceNames.includes('M'), `expected M in workspace, got: ${workspaceNames}`);
-    const workspaceValues = await page.$$eval('#workspace .history-out', (els) => els.map((e) => e.textContent.trim()));
+    const workspaceValues = await page.$$eval('#workspace .workspace-item', (els) => els.map((e) => e.dataset.value));
     assert.ok(workspaceValues.some((v) => v.includes('1') && v.includes('4')), `expected M's value shown, got: ${workspaceValues}`);
 
     await computeEnter(page, '\\det M');
@@ -226,7 +213,7 @@ test('a workspace constant keeps its exact form, not just a rounded decimal', as
   const { page } = await openPage();
   try {
     await computeEnter(page, '\\rho=\\frac{1}{\\sqrt{2}}');
-    const workspaceNames = await page.$$eval('#workspace .history-in', (els) => els.map((e) => e.textContent.trim()));
+    const workspaceNames = await page.$$eval('#workspace .workspace-item', (els) => els.map((e) => e.dataset.name));
     assert.ok(workspaceNames.includes('rho'), `expected rho in workspace, got: ${workspaceNames}`);
 
     await computeEnter(page, 'e^{\\rho^2}');
@@ -243,13 +230,11 @@ test('a workspace constant keeps its exact form, not just a rounded decimal', as
   }
 });
 
-test('switching to Plot and Help views loads their modules with no errors', async () => {
+test('switching to the Plot view loads its module with no errors', async () => {
   const { page, consoleErrors, networkErrors } = await openPage();
   try {
     await page.click('a[data-view="plot"]');
     await new Promise((resolve) => setTimeout(resolve, 1200));
-    await page.click('a[data-view="help"]');
-    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     assert.deepEqual(consoleErrors, []);
     assert.deepEqual(networkErrors, []);

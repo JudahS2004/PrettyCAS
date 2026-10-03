@@ -8,9 +8,11 @@ from .mathjson import (
     to_sympy, substitute_functions, retry_unresolved_integrals, sympify_constant,
     has_unresolved_integral, _run_with_timeout, _exact_mathjson,
 )
+from . import maxima_bridge
 from .solvers import solve_equation
 from .solvers import matrix_equation
 from .solvers.system import solve_system
+from .solvers.algebraic import PREFER_ALGEBRAIC
 from .format_result import (
     to_display as _to_display,
     to_engineering as _to_engineering,
@@ -45,13 +47,15 @@ _RESOLVE_CACHE_MAX = 64
 _CACHE_LOCK = threading.Lock()
 
 
-def _cache_key(mathjson, angle_mode, simplify_mode, solve_for, constants, functions, engine_preference):
+def _cache_key(mathjson, angle_mode, simplify_mode, solve_for, constants, functions, engine_preference,
+               prefer_algebraic):
     # json.dumps(..., sort_keys=True) rather than something hashable like a
     # tuple: mathjson is an arbitrary nested list/dict straight from the
     # request body, and constants/functions are plain dicts — both need a
     # stable string form more than they need speed here.
     return json.dumps(
-        [mathjson, angle_mode, simplify_mode, solve_for, constants, functions, engine_preference],
+        [mathjson, angle_mode, simplify_mode, solve_for, constants, functions, engine_preference,
+         prefer_algebraic],
         sort_keys=True, default=str,
     )
 
@@ -141,9 +145,25 @@ def _format_number(value, decimals, number_format, complex_form="rectangular"):
     everything below, rather than folded into the standard/decimal branches,
     since it needs Abs/arg computed independently instead of value's normal
     str()/evalf() path either way.
+
+    complex_form == "rectangular" (the default) only needs an active step in
+    Standard/exact mode: Decimal/Engineering already shows a clean a+bi via
+    plain evalf regardless of the value's symbolic shape, but a solve result
+    built from Cardano's cubic formula can leave a genuine complex number's
+    real/imaginary parts still coupled together (e.g. a cube-root factor
+    multiplied through a complex coefficient, then added to that same
+    coefficient's reciprocal) rather than cleanly split — expand_complex()
+    is what actually performs that a+bi split; nothing did this before,
+    despite "rectangular" nominally being an active choice symmetric with
+    "polar" above.
     """
     if complex_form == "polar" and _is_complex_number(value):
         return _format_polar(value, None if number_format == "standard" else decimals)
+
+    if complex_form == "rectangular" and number_format == "standard" and _is_complex_number(value):
+        expanded = _safe_simplify(lambda: sp.expand_complex(value), value)
+        if expanded is not None:
+            value = expanded
 
     if number_format == "standard":
         display = _to_display(value, None)
@@ -188,7 +208,8 @@ def _format_polar(value, decimals):
     to I at construction time, so e.g. sqrt(-4) still prints as 2*I here,
     not the technically-valid but needlessly ugly 2*exp(I*pi/2).
 
-    Otherwise (Decimal/Engineering): evalf-ing the whole r*exp(I*theta)
+    Otherwise (Decimal/Engineering, or a Standard/exact result that's too
+    long to show exactly — see below): evalf-ing the whole r*exp(I*theta)
     expression at once collapses straight back to a rectangular re/im pair —
     mpmath's complex evalf has no polar internal form to preserve — so r and
     theta are evalf'd independently (each capped the same "already numeric"
@@ -201,7 +222,26 @@ def _format_polar(value, decimals):
     theta = sp.simplify(sp.arg(value))
     if decimals is None:
         polar = r * sp.exp(sp.I * theta)
-        return _safe_str_latex(polar)
+        # NOT _safe_str_latex(polar) here: that helper's own too-long
+        # fallback evalfs whatever value it's handed as one combined
+        # expression, which — per this function's own docstring just above —
+        # collapses r*exp(I*theta) straight back to a plain rectangular
+        # decimal. That's the right degradation for an ordinary exact value,
+        # but for a polar-mode result it silently defeats the whole point of
+        # this setting (confirmed live: a Cardano-cubic-formula root's exact
+        # polar form runs ~375 chars, past STANDARD_MAX_LEN, and came out as
+        # bare "-2.379 - 0.972*I" with no visual sign a fallback had even
+        # happened). So: try the exact form first, same length/ValueError
+        # checks _safe_str_latex itself uses, but on a cap miss fall through
+        # to the decimals-provided branch below (independent r/theta evalf)
+        # instead of its generic one.
+        try:
+            text, latex = str(polar), _to_latex(polar)
+            if len(text) <= STANDARD_MAX_LEN:
+                return text, latex
+        except ValueError:
+            pass
+        decimals = 15
     decimals = _cap_decimals(value, decimals)
     r_val, theta_val = r.evalf(decimals), theta.evalf(decimals)
     # theta before "i", not after: theta_val is a plain signed decimal
@@ -250,7 +290,7 @@ def _safe_simplify(fn, original):
     return result
 
 
-def _apply_simplify_mode(expr, mode):
+def _apply_simplify_mode(expr, mode, engine_preference="sympy"):
     # cos(2+i) etc.: sp.simplify() alone leaves a complex-argument trig call
     # exactly as entered, since "cos(2 + I)" is already its own valid form
     # as far as simplify() is concerned. expand_complex() is the step that
@@ -265,6 +305,14 @@ def _apply_simplify_mode(expr, mode):
         if result is not None:
             return result
         return _safe_simplify(lambda: sp.simplify(expr), expr) or expr
+    # Test: when the user's engine preference is Maxima, try its general
+    # radcan/trigsimp simplification ahead of sympy's own simplify() —
+    # falling straight through to sympy (same as the integration bridge)
+    # whenever Maxima isn't installed, times out, or gives up.
+    if engine_preference == "maxima" and maxima_bridge.is_available():
+        result = _safe_simplify(lambda: maxima_bridge.simplify(expr), expr)
+        if result is not None:
+            return result
     return _safe_simplify(lambda: sp.simplify(expr), expr) or expr
 
 
@@ -281,6 +329,7 @@ def handle(mathjson, options=None):
     engine_preference = options.get("engine_preference")
     if engine_preference not in ("sympy", "maxima"):
         engine_preference = "sympy"
+    prefer_algebraic = bool(options.get("prefer_algebraic", False))
     if simplify_mode not in SIMPLIFY_MODES:
         simplify_mode = "auto"
     if number_format not in NUMBER_FORMATS:
@@ -288,10 +337,17 @@ def handle(mathjson, options=None):
     if complex_form not in ("rectangular", "polar"):
         complex_form = "rectangular"
 
-    key = _cache_key(mathjson, angle_mode, simplify_mode, solve_for, constants, functions, engine_preference)
+    key = _cache_key(mathjson, angle_mode, simplify_mode, solve_for, constants, functions, engine_preference,
+                     prefer_algebraic)
     resolved = _cache_get(key)
     if resolved is None:
-        resolved = _resolve(mathjson, angle_mode, simplify_mode, solve_for, constants, functions, engine_preference)
+        # Read by the solvers (see solvers/algebraic.py's PREFER_ALGEBRAIC)
+        # rather than threaded through every _resolve_* signature.
+        token = PREFER_ALGEBRAIC.set(prefer_algebraic)
+        try:
+            resolved = _resolve(mathjson, angle_mode, simplify_mode, solve_for, constants, functions, engine_preference)
+        finally:
+            PREFER_ALGEBRAIC.reset(token)
         _cache_put(key, resolved)
 
     # complex_form is a pure render-time choice (like decimals/number_format)
@@ -447,7 +503,7 @@ def _resolve(mathjson, angle_mode, simplify_mode, solve_for, constants, function
         return _final({"mode": "error", "result": "couldn't find a closed form for this integral"})
 
     try:
-        simplified = _apply_simplify_mode(expr, simplify_mode)
+        simplified = _apply_simplify_mode(expr, simplify_mode, engine_preference)
     except Exception as e:
         return _final({"mode": "error", "result": str(e)})
 

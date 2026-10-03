@@ -1,3 +1,6 @@
+import contextvars
+import multiprocessing
+
 import sympy as sp
 from sympy.polys.polyroots import roots_cubic
 
@@ -18,6 +21,55 @@ from ..mathjson import _run_with_timeout
 # waiting on (not a background retry the way the integral timeout mostly
 # is), so it's worth giving sp.solve a bit more rope before giving up.
 SOLVE_TIMEOUT = 4  # seconds
+
+# The "Prefer algebraic solutions" setting, set per request by compute.handle.
+# Off: equations/systems that are almost never solvable in closed form (see
+# solve_equation's and solve_system's docstrings) go straight to numeric.
+# On: they get an isolated sp.solve attempt first, then numeric.
+PREFER_ALGEBRAIC = contextvars.ContextVar("prefer_algebraic", default=False)
+
+# Time for an isolated attempt, including starting a fresh Python process
+# and importing sympy in it (~1s).
+ISOLATED_SOLVE_TIMEOUT = 8  # seconds
+
+
+def _isolated_worker(conn, args, kwargs):
+    try:
+        conn.send(("ok", sp.solve(*args, **kwargs)))
+    except Exception as e:
+        conn.send(("error", repr(e)))
+    finally:
+        conn.close()
+
+
+def solve_isolated(*args, **kwargs):
+    """sp.solve in a separate process that is killed on timeout. Used for
+    inputs where sp.solve is known to grind inside GIL-holding calls that
+    the thread-based _run_with_timeout can't interrupt. Returns sp.solve's
+    result, or None on timeout/error. "spawn" on every platform: forking
+    a threaded server process isn't safe, and it's the only option on
+    Windows anyway (desktop.py calls freeze_support for the frozen build).
+    """
+    ctx = multiprocessing.get_context("spawn")
+    receiver, sender = ctx.Pipe(duplex=False)
+    process = ctx.Process(target=_isolated_worker, args=(sender, args, kwargs), daemon=True)
+    try:
+        process.start()
+    except Exception:
+        return None
+    sender.close()
+    try:
+        if not receiver.poll(ISOLATED_SOLVE_TIMEOUT):
+            return None
+        status, value = receiver.recv()
+    except Exception:
+        return None
+    finally:
+        if process.is_alive():
+            process.kill()
+        process.join(1)
+        receiver.close()
+    return value if status == "ok" else None
 
 
 def _real_cubic_trig_form(expr, symbol):
@@ -53,15 +105,19 @@ def _real_cubic_trig_form(expr, symbol):
     return None if any(r.has(sp.I) for r in roots) else roots
 
 
-def try_algebraic(expr, symbol):
+def try_algebraic(expr, symbol, isolated=False):
     """Attempt a closed-form solve of the equation `expr` for `symbol`.
 
     Returns a list of sympy solutions on success, or None if sympy has no
     closed-form algorithm for this equation (or finds no solutions), so the
-    caller should fall back to a numerical method.
+    caller should fall back to a numerical method. `isolated` runs sp.solve
+    in a killable subprocess (see solve_isolated).
     """
     try:
-        solutions = _run_with_timeout(sp.solve, expr, symbol, on_timeout=None, timeout=SOLVE_TIMEOUT)
+        if isolated:
+            solutions = solve_isolated(expr, symbol)
+        else:
+            solutions = _run_with_timeout(sp.solve, expr, symbol, on_timeout=None, timeout=SOLVE_TIMEOUT)
     except (NotImplementedError, TypeError):
         return None
     if solutions is None:
